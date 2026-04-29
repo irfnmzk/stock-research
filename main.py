@@ -143,6 +143,23 @@ def cmd_pipeline_morning(args, cfg):
     print_pipeline_json(data)
 
 
+def cmd_report_morning(args, cfg):
+    """One-shot morning report: fetch-all + pipeline-morning."""
+    from fetcher import fetch_prices, fetch_broker_summary, fetch_fundamentals
+    from news import fetch_news
+    from reports import get_morning_brief_data, print_pipeline_json
+
+    print("=== Fetch Phase ===")
+    fetch_prices(cfg, days=args.days)
+    fetch_broker_summary(cfg)
+    fetch_fundamentals(cfg)
+    fetch_news(cfg)
+
+    print("\n=== Morning Brief Pipeline ===")
+    data = get_morning_brief_data(cfg)
+    print_pipeline_json(data)
+
+
 def cmd_pipeline_eod(args, cfg):
     """Run full EOD report pipeline.
 
@@ -158,6 +175,26 @@ def cmd_pipeline_eod(args, cfg):
       9. Assemble EOD report data
       10. Print JSON for LLM layer
     """
+    _run_eod_pipeline(args, cfg)
+
+
+def cmd_report_eod(args, cfg):
+    """One-shot EOD report: fetch-all + pipeline-eod in a single command."""
+    from fetcher import fetch_prices, fetch_broker_summary, fetch_fundamentals
+    from news import fetch_news
+
+    print("=== Fetch Phase ===")
+    fetch_prices(cfg, days=args.fetch_days)
+    fetch_broker_summary(cfg)
+    fetch_fundamentals(cfg)
+    fetch_news(cfg)
+
+    print("\n=== EOD Pipeline ===")
+    _run_eod_pipeline(args, cfg)
+
+
+def _run_eod_pipeline(args, cfg):
+    """Shared EOD pipeline logic used by both pipeline-eod and report-eod."""
     from indicators import compute_all as compute_indicators
     from whale import compute_all as compute_whales
     from support_resistance import detect_all
@@ -165,8 +202,6 @@ def cmd_pipeline_eod(args, cfg):
     from reports import get_eod_report_data, print_pipeline_json
     from charts import render_chart
     from db import get_db
-
-    print("=== EOD Pipeline ===")
 
     # Steps 1-3: compute derived data
     print("\n--- Computing indicators ---")
@@ -262,9 +297,18 @@ def cli():
     # pipeline-morning
     sub.add_parser("pipeline-morning", help="run morning brief pipeline (macro + watchlist + portfolio)")
 
+    # report-morning (one-shot: fetch + morning pipeline)
+    p = sub.add_parser("report-morning", help="one-shot morning report: fetch + pipeline")
+    p.add_argument("--days", type=int, default=180, help="days of price history to fetch")
+
     # pipeline-eod
     p = sub.add_parser("pipeline-eod", help="run full EOD report pipeline")
     p.add_argument("--days", type=int, default=90, help="chart days to show")
+
+    # report-eod (one-shot: fetch + eod pipeline)
+    p = sub.add_parser("report-eod", help="one-shot EOD report: fetch + pipeline")
+    p.add_argument("--days", type=int, default=90, help="chart days to show")
+    p.add_argument("--fetch-days", type=int, default=180, help="days of price history to fetch")
 
     # indicators
     p = sub.add_parser("indicators", help="compute technical indicators")
@@ -343,7 +387,9 @@ def cli():
         "fetch-news": cmd_fetch_news,
         "fetch-all": cmd_fetch_all,
         "pipeline-morning": cmd_pipeline_morning,
+        "report-morning": cmd_report_morning,
         "pipeline-eod": cmd_pipeline_eod,
+        "report-eod": cmd_report_eod,
         "indicators": cmd_indicators,
         "sr": cmd_sr,
         "screen": cmd_screen,

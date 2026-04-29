@@ -106,9 +106,11 @@ All commands are run via `uv run python main.py <command>`.
 |---------|-------------|
 | `pipeline-morning` | Full morning brief: macro + watchlist + portfolio data as JSON |
 | `pipeline-eod --days N` | Full EOD: indicators, whale, S/R, sector, screener, charts, JSON |
+| `report-morning` | One-shot: fetch-all + pipeline-morning in a single command |
+| `report-eod --days N` | One-shot: fetch-all + pipeline-eod in a single command |
 
 Pipeline commands output structured JSON that the LLM agent reads and interprets
-into narrative reports.
+into narrative reports. The `report-*` variants include the fetch phase, so a single command produces a complete report-ready output.
 
 ### Portfolio
 

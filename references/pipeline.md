@@ -47,6 +47,8 @@ Note: `indicators` is the main compute step. It processes prices into all techni
 |---------|----------------|--------|
 | `pipeline-morning` | macro regime, sector leaders, watchlist snapshot (price + indicators + S/R + whale), portfolio stop warnings, recent news | JSON dict |
 | `pipeline-eod --days N` | Everything in morning + screener hits (full pool), signal scores, portfolio P&L, tranche suggestions | JSON dict |
+| `report-morning --days N` | One-shot: runs fetch-all then pipeline-morning | JSON dict |
+| `report-eod --days N` | One-shot: runs fetch-all then pipeline-eod (fetch + compute + charts + JSON) | JSON dict + chart PNGs |
 | `chart SYMBOL --days N` | prices, indicators | PNG image saved to data/charts/ |
 
 ### Stage 4: LLM Interpretation
@@ -135,17 +137,19 @@ Assesses overall market environment:
 
 ```
 # Morning (before market open)
-fetch-macro                          # get latest macro data
-macro-signals                        # assess regime
-pipeline-morning                     # gather morning brief data
+report-morning                       # one-shot: fetch + morning brief pipeline
 # -> LLM generates morning brief
 
 # After market close
-fetch-all                            # fetch all daily data
-indicators                           # compute all indicators
-sr --symbols <watchlist>             # update S/R levels
-pipeline-eod                         # gather EOD report data
-chart <symbol> --days 60             # render charts for watchlist
+report-eod                           # one-shot: fetch + compute + charts + EOD pipeline
+# -> LLM generates EOD report with charts
+
+# Alternative: step-by-step (if data already fetched)
+# fetch-all                          # fetch all daily data
+# indicators                         # compute all indicators
+# sr --symbols <watchlist>           # update S/R levels
+# pipeline-eod                       # gather EOD report data
+# chart <symbol> --days 60           # render charts for watchlist
 # -> LLM generates EOD report with charts
 
 # Weekly (Saturday)
