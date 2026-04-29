@@ -9,12 +9,9 @@ pool:
 watchlist:
   - BBNI
   - INCO
-  - ITMG
-  - INDF
-  - GGRM
+  - TAPG
   - GJTL
   - ELSA
-  - AKRA
 
 # --- Stockbit API ---
 stockbit:

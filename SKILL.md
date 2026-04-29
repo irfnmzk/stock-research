@@ -136,16 +136,60 @@ Key sections:
 
 ## Architecture
 
-Two-layer design:
+Two-layer design with decoupled pipeline and report generation:
 
-**Python layer** (this skill): fetches data, computes indicators, stores in
-SQLite, renders charts, outputs structured JSON.
+**Python pipeline** (`run_eod.py`): standalone script that runs on a schedule
+(nanobot cron, weekdays 16:30 WIB). Fetches data, computes indicators, screens,
+generates watchlist charts, and writes results to `data/latest_eod.json`.
+Always writes `data/pipeline_status.json` with run status. Logs to
+`data/pipeline.log`. No LLM involvement.
 
-**LLM layer** (the agent): reads JSON output and chart images, interprets
-patterns, connects signals with news/macro context, generates narrative reports.
+**LLM report layer** (the agent): triggered after pipeline completes. Reads
+`pipeline_status.json` + `latest_eod.json` + `analysis_log.md`, generates a
+short Telegram summary with portfolio status, action recommendations, watchlist
+signals, screener picks, and macro brief. Charts sent only on demand.
 
-See [references/pipeline.md](references/pipeline.md) for full architecture, data flow,
-and computed data details.
+### Pipeline output files
+
+| File | Description |
+|------|-------------|
+| `data/latest_eod.json` | Full pipeline output (overwritten each run, atomic write) |
+| `data/pipeline_status.json` | Run status: `ok`, `partial`, or `error` with details |
+| `data/pipeline.log` | Append-only log for debugging |
+| `data/charts/*.png` | Pre-generated watchlist + top screener charts |
+
+### Daily schedule
+
+- **16:30 WIB** (weekdays): `run_eod.py` runs fetch + compute + screen + charts
+- **After pipeline**: LLM reads pre-computed JSON, sends short EOD summary to Telegram
+- No separate morning report (IDX data unchanged overnight)
+
+### Running the pipeline manually
+
+```bash
+cd <skill-directory>
+uv run python run_eod.py [--fetch-days 180] [--chart-days 90]
+```
+
+The `main.py` CLI commands still work for ad-hoc queries and on-demand analysis.
+
+See [references/pipeline.md](references/pipeline.md) for full data flow details.
+
+## Setup
+
+1. Copy the sample config:
+   ```bash
+   cp config.sample.yaml config.yaml
+   ```
+2. Edit `config.yaml` with your watchlist and preferences
+3. Create `data/.env` with your Stockbit credentials:
+   ```
+   STOCKBIT_JWT=<your-jwt-token>
+   ```
+4. Install dependencies:
+   ```bash
+   uv sync
+   ```
 
 ## Key References
 
@@ -167,4 +211,7 @@ These files are created at runtime and not tracked in git:
 - `data/.env` - API credentials
 - `data/.tokens.json` - Stockbit token rotation state
 - `data/charts/` - Rendered chart PNGs
+- `data/latest_eod.json` - Pre-computed EOD pipeline output (overwritten daily)
+- `data/pipeline_status.json` - Pipeline run status (ok/partial/error)
+- `data/pipeline.log` - Pipeline execution log
 - `data/analysis_log.md` - Rolling analysis journal (see references/analysis-log-format.md)
