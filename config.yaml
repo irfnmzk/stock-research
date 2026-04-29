@@ -1,0 +1,118 @@
+# IDX Research Assistant Configuration
+
+# --- Watchlist ---
+# --- Scan Pool ---
+pool:
+  size: 300                # top N stocks by market cap
+  min_avg_volume: 0        # minimum avg daily volume filter (0 = no filter)
+
+watchlist:
+  - BBNI
+  - INCO
+  - ITMG
+  - INDF
+  - GGRM
+  - ELSA
+  - AKRA
+
+# --- Stockbit API ---
+stockbit:
+  base_url: https://exodus.stockbit.com
+  # STOCKBIT_REFRESH_TOKEN env var used for auth
+
+# --- Technical indicators ---
+indicators:
+  ema_periods: [20, 50, 200]
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  bb_period: 20
+  bb_std: 2
+  atr_period: 14
+  volume_avg_period: 20
+
+# --- Support / Resistance ---
+support_resistance:
+  window: 5             # argrelextrema window
+  cluster_pct: 0.02     # merge levels within 2%
+  min_touches: 2
+
+# --- Breakout ---
+breakout:
+  volume_ratio_min: 1.5
+  confirm_days: 2       # consecutive closes beyond level
+
+# --- Whale tracking ---
+whale:
+  smart_brokers: [YP, CC, ZP, AK, RX, KS, MS]
+  accumulation_days: 5
+  foreign_flow_windows: [5, 10, 20]
+  alert_threshold: 0.7
+
+# --- Sector rotation ---
+sectors:
+  indices:
+    - IDXFINANCE
+    - IDXBASIC
+    - IDXENERGY
+    - IDXINFRA
+    - IDXPROPERT
+    - IDXTECHNO
+    - IDXHEALTH
+    - IDXINDUST
+    - IDXTRANS
+  windows: [5, 10, 20]
+
+# --- Screener rules ---
+screener:
+  rules:
+    momentum_breakout:
+      - volume_ratio > 2
+      - close > ema20
+      - rsi < 70
+    whale_accumulation:
+      - composite_score > 0.6
+      - close >= support * 0.98
+    sector_inflow:
+      - sector_rank_5d < sector_rank_20d
+      - foreign_net_5d > 0
+    value_play:
+      - pe_ttm < 15
+      - pbv < 1.5
+      - dividend_yield > 3
+    capitulation_reversal:
+      - volume_ratio > 2.5
+      - close > open
+      - close <= support * 1.02
+      - rsi < 35
+
+# --- Signal scoring weights ---
+signals:
+  weights:
+    whale_score: 1.0
+    foreign_flow: 1.5
+    near_support: 1.0
+    rsi_oversold: 0.5
+    volume_spike: 0.5
+    sector_momentum: 0.5
+  macro_modifier:
+    risk_on: 0.5
+    cautious: 0.0
+    risk_off: -1.0
+  score_threshold: 3.0
+
+# --- Relative strength ---
+relative_strength:
+  benchmark: IHSG
+  windows: [5, 10, 20]
+
+# --- Database ---
+db:
+  path: data/stock-research.db
+
+# --- Charts ---
+charts:
+  output_dir: data/charts
+  style: charles
+  figsize: [14, 10]

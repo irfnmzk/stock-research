@@ -1,0 +1,10 @@
+data/.env
+data/.tokens.json
+data/stock-research.db
+data/stock-research.db.bak
+data/market.db
+data/charts/
+data/analysis_log.md
+*.egg-info/
+__pycache__/
+.venv/
