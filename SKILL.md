@@ -147,9 +147,13 @@ See [references/PLAN.md](references/PLAN.md) for full architecture, data model
 
 ## Key References
 
-- [references/PLAN.md](references/PLAN.md) - Full project plan, data model, endpoints, build status
+- [references/PLAN.md](references/PLAN.md) - Full project plan, endpoints, build status
+- [references/schema.md](references/schema.md) - Database schema (19 tables), column definitions, common SQL query patterns
+- [references/pipeline.md](references/pipeline.md) - End-to-end data flow, computed data details, daily workflow
 - [references/api-quirks.md](references/api-quirks.md) - Stockbit API gotchas
 - [references/analysis-log-format.md](references/analysis-log-format.md) - Analysis log format and maintenance
+
+For complex analysis beyond CLI commands, read `references/schema.md` for direct SQL queries against the SQLite database.
 
 ## Runtime Data
 
