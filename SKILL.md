@@ -142,12 +142,11 @@ SQLite, renders charts, outputs structured JSON.
 **LLM layer** (the agent): reads JSON output and chart images, interprets
 patterns, connects signals with news/macro context, generates narrative reports.
 
-See [references/PLAN.md](references/PLAN.md) for full architecture, data model
-(13 SQLite tables), and build status.
+See [references/pipeline.md](references/pipeline.md) for full architecture, data flow,
+and computed data details.
 
 ## Key References
 
-- [references/PLAN.md](references/PLAN.md) - Full project plan, endpoints, build status
 - [references/schema.md](references/schema.md) - Database schema (19 tables), column definitions, common SQL query patterns
 - [references/pipeline.md](references/pipeline.md) - End-to-end data flow, computed data details, daily workflow
 - [references/api-quirks.md](references/api-quirks.md) - Stockbit API gotchas

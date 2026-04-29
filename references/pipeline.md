@@ -72,7 +72,12 @@ From raw OHLCV prices, computes:
 
 Combines two signals into a composite score:
 - **Foreign flow score**: normalized net foreign buy/sell over recent days. Weighted 1.5x in final scoring.
+  - Daily net foreign buy/sell per stock
+  - Cumulative foreign flow over 5d, 10d, 20d windows
+  - Divergence detection: foreign buying while price flat/down = accumulation signal
 - **Broker score**: activity of smart brokers (YP, CC, ZP, AK, RX, KS, MS) relative to total volume.
+  - Net buy/sell per broker per stock per day
+  - Rolling accumulation: consistent buying over 3-5 days weighted higher
 - **Composite**: weighted combination. Higher = more institutional accumulation.
 
 ### Bandar Detector (fetcher.py)
@@ -85,9 +90,19 @@ Measures broker concentration:
 ### Support/Resistance (support_resistance.py)
 
 Peak/trough detection on price history:
+- **Algorithm**: scipy `argrelextrema` with window=5 to find local minima (support) and maxima (resistance)
+- **Clustering**: nearby levels within 1-2% tolerance are merged into a single level
 - **level**: price point where reversals occurred
 - **touch_count**: more touches = stronger level
 - **strength_score**: combines touch count, recency, and volume at level
+
+### Breakout Detection
+
+Built into the screener/S&R logic:
+- Price closes above resistance or below support
+- Volume confirmation: volume_ratio > 1.5x
+- Consolidation tightness: Bollinger bandwidth or ATR contraction before breakout
+- Confirmed after 2 consecutive closes beyond the level
 
 ### Sector Rotation (sector.py)
 
