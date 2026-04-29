@@ -149,6 +149,8 @@ and computed data details.
 
 - [references/schema.md](references/schema.md) - Database schema (19 tables), column definitions, common SQL query patterns
 - [references/pipeline.md](references/pipeline.md) - End-to-end data flow, computed data details, daily workflow
+- [references/config.md](references/config.md) - All config.yaml options, screener rule syntax, available fields
+- [references/scoring.md](references/scoring.md) - Signal scoring algorithm, weights, thresholds, interpretation
 - [references/api-quirks.md](references/api-quirks.md) - Stockbit API gotchas
 - [references/analysis-log-format.md](references/analysis-log-format.md) - Analysis log format and maintenance
 
