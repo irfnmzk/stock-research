@@ -195,7 +195,7 @@ When scanner flags a stock, system shows: suggested lot size per tranche based o
 ## Execution Order
 
 1. Price backfill (done)
-2. Broker backfill (in progress)
+2. Broker backfill (done -- 1,652 dates, 2020-01-01 to 2026-04-30)
 3. Compute signal base rates (broker signals per stock)
 4. Compute technical signal base rates
 5. Measure signal combinations

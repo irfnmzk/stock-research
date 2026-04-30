@@ -247,6 +247,68 @@ CREATE INDEX IF NOT EXISTS idx_news_symbol ON news(symbol_queried);
 CREATE INDEX IF NOT EXISTS idx_indicators_symbol ON indicators(symbol, date);
 CREATE INDEX IF NOT EXISTS idx_signals_symbol ON signals(symbol, date);
 CREATE INDEX IF NOT EXISTS idx_alerts_sent_symbol ON alerts_sent(symbol, sent_at);
+
+CREATE TABLE IF NOT EXISTS signal_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol          TEXT NOT NULL,
+    date            TEXT NOT NULL,
+    signal_type     TEXT NOT NULL,
+    broker_code     TEXT,
+    magnitude       REAL,
+    close           REAL,
+    volume_ratio    REAL,
+    regime          TEXT,
+    trend           TEXT,
+    fwd_5d          REAL,
+    fwd_10d         REAL,
+    fwd_20d         REAL,
+    filled_through  INTEGER DEFAULT 0,
+    meta            TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_se_type_symbol ON signal_events(signal_type, symbol);
+CREATE INDEX IF NOT EXISTS idx_se_broker ON signal_events(broker_code, symbol)
+    WHERE broker_code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_se_date ON signal_events(date);
+CREATE INDEX IF NOT EXISTS idx_se_regime ON signal_events(regime, signal_type);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_se_dedup ON signal_events(symbol, date, signal_type, broker_code);
+
+CREATE TABLE IF NOT EXISTS signal_base_rates (
+    signal_type     TEXT NOT NULL,
+    symbol          TEXT,
+    broker_code     TEXT,
+    sample_size     INTEGER,
+    hit_rate_5d     REAL,
+    hit_rate_10d    REAL,
+    hit_rate_20d    REAL,
+    avg_return_5d   REAL,
+    avg_return_10d  REAL,
+    avg_return_20d  REAL,
+    median_return_5d  REAL,
+    median_return_10d REAL,
+    median_return_20d REAL,
+    last_computed   TEXT,
+    PRIMARY KEY (signal_type, symbol, broker_code)
+);
+
+CREATE TABLE IF NOT EXISTS broker_rankings (
+    symbol          TEXT,
+    sector          TEXT,
+    broker_code     TEXT NOT NULL,
+    level           TEXT NOT NULL,
+    hit_rate_5d     REAL,
+    hit_rate_10d    REAL,
+    avg_return_5d   REAL,
+    avg_return_10d  REAL,
+    sample_size     INTEGER,
+    rank            INTEGER,
+    is_smart        INTEGER DEFAULT 0,
+    last_computed   TEXT,
+    PRIMARY KEY (level, symbol, sector, broker_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_br_smart ON broker_rankings(symbol)
+    WHERE is_smart = 1;
 """
 
 
