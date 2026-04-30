@@ -30,8 +30,10 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ```bash
 cd <skill-directory>
-uv sync
+uv venv && uv pip install -e .
 ```
+
+**Pitfall**: if a stale `.venv` exists (e.g. copied from another machine), use `uv venv --clear` first.
 
 ### 3. Set up credentials
 
@@ -139,7 +141,7 @@ Key sections:
 Two-layer design with decoupled pipeline and report generation:
 
 **Python pipeline** (`run_eod.py`): standalone script that runs on a schedule
-(nanobot cron, weekdays 16:30 WIB). Fetches data, computes indicators, screens,
+(cron job, weekdays 16:30 WIB). Fetches data, computes indicators, screens,
 generates watchlist charts, and writes results to `data/latest_eod.json`.
 Always writes `data/pipeline_status.json` with run status. Logs to
 `data/pipeline.log`. No LLM involvement.

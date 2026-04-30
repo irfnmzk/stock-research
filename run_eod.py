@@ -101,14 +101,17 @@ def _write_status(status: str, error: str | None = None, partial: bool = False,
 
 def step_fetch(cfg, fetch_days=180):
     """Fetch prices, brokers, fundamentals, news for the full pool."""
-    from fetcher import fetch_prices, fetch_broker_summary, fetch_fundamentals
+    from fetcher import fetch_prices, fetch_broker_summary, fetch_fundamentals, _pool_symbols
     from news import fetch_news
 
     log.info("Fetching prices (%d days)...", fetch_days)
     fetch_prices(cfg, days=fetch_days)
 
-    log.info("Fetching broker data...")
-    fetch_broker_summary(cfg)
+    # Fetch broker data for full 300-stock pool (not just watchlist)
+    # to accumulate data for smart money / broker scoring analysis
+    pool = _pool_symbols(cfg)
+    log.info("Fetching broker data (%d pool stocks)...", len(pool))
+    fetch_broker_summary(cfg, symbols=pool if pool else None)
 
     log.info("Fetching fundamentals...")
     fetch_fundamentals(cfg)
