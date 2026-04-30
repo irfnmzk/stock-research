@@ -195,7 +195,8 @@ See [references/pipeline.md](references/pipeline.md) for full data flow details.
 
 ## Key References
 
-- [references/schema.md](references/schema.md) - Database schema (19 tables), column definitions, common SQL query patterns
+- [references/telegram-media-caption.md](references/telegram-media-caption.md) - Gateway MEDIA: caption limitation and workarounds
+- [references/schema.md](references/schema.md) - Database schema (21 tables), column definitions, common SQL query patterns
 - [references/pipeline.md](references/pipeline.md) - End-to-end data flow, computed data details, daily workflow
 - [references/config.md](references/config.md) - All config.yaml options, screener rule syntax, available fields
 - [references/scoring.md](references/scoring.md) - Signal scoring algorithm, weights, thresholds, interpretation
@@ -203,6 +204,20 @@ See [references/pipeline.md](references/pipeline.md) for full data flow details.
 - [references/analysis-log-format.md](references/analysis-log-format.md) - Analysis log format and maintenance
 
 For complex analysis beyond CLI commands, read `references/schema.md` for direct SQL queries against the SQLite database.
+
+## Pitfalls
+
+### SQLite Concurrent Access
+The backfill process and EOD cron can run simultaneously, causing `sqlite3.OperationalError: database is locked`. Two fixes applied:
+- `timeout=30` in `sqlite3.connect()` (in `db.py`)
+- WAL journal mode enabled on the database (`PRAGMA journal_mode=WAL`)
+WAL mode is persistent on the DB file. If recreating the DB, re-enable it.
+
+### Telegram MEDIA: Caption Limitation
+The Hermes gateway `extract_media()` strips MEDIA: tags from text, sends text first, then sends images separately with NO caption. There is no built-in way to send image+caption as one Telegram message via MEDIA: syntax. User accepted split messages (2026-04-30). No custom workaround needed.
+
+### Chart Delivery Format
+The gateway MEDIA: tag always splits into separate image + text messages. User accepted this limitation (2026-04-30) and no longer requires a custom solution. Current approach: send MEDIA:/path/to/chart.png with the text caption in the same message block. They arrive as two Telegram messages (image then text) but are visually adjacent. This is the accepted workflow.
 
 ## Runtime Data
 

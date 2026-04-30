@@ -178,6 +178,23 @@ CREATE TABLE IF NOT EXISTS alerts_sent (
     message    TEXT
 );
 
+CREATE TABLE IF NOT EXISTS capital (
+    id              INTEGER PRIMARY KEY CHECK (id = 1),
+    total           REAL NOT NULL,
+    risk_per_trade  REAL DEFAULT 0.02,
+    max_heat        REAL DEFAULT 0.08,
+    updated_at      TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS capital_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    date            TEXT NOT NULL,
+    action          TEXT NOT NULL,  -- 'deposit', 'withdraw', 'adjust'
+    amount          REAL NOT NULL,
+    balance_after   REAL NOT NULL,
+    notes           TEXT
+);
+
 CREATE TABLE IF NOT EXISTS scan_pool (
     symbol      TEXT PRIMARY KEY,
     market_cap  REAL,
@@ -237,7 +254,7 @@ def get_db(cfg) -> sqlite3.Connection:
     """Open (and initialize) the database."""
     db_path = Path(cfg["db"]["path"])
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
     return conn

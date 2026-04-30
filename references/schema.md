@@ -346,6 +346,38 @@ Populated by: alert system (currently 0 rows)
 
 ---
 
+### capital
+Single-row table tracking total trading capital and risk parameters.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | INTEGER | PK, CHECK (id = 1) — always one row |
+| total | REAL | Total capital (IDR) |
+| risk_per_trade | REAL | Default 0.02 (2%) |
+| max_heat | REAL | Default 0.08 (8%) — max portfolio risk |
+| updated_at | TEXT | Last update timestamp |
+
+Populated by: manual update on deposit/withdrawal
+Current: 500,000 IDR initial deposit
+
+---
+
+### capital_log
+Audit trail for capital changes (deposits, withdrawals, adjustments).
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | INTEGER | PK |
+| date | TEXT | |
+| action | TEXT | "deposit", "withdraw", "adjust" |
+| amount | REAL | |
+| balance_after | REAL | |
+| notes | TEXT | |
+
+Populated by: logged on every capital change
+
+---
+
 ## Common Query Patterns
 
 ### Latest price + indicators + whale score for a symbol

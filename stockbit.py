@@ -140,8 +140,12 @@ class StockbitClient:
         })
 
     def market_detectors(self, symbol: str) -> dict:
-        """Broker summary + bandar detector for a symbol."""
+        """Broker summary + bandar detector for a symbol (latest day)."""
         return self._get(f"/marketdetectors/{symbol}")
+
+    def market_detectors_date(self, symbol: str, date: str) -> dict:
+        """Broker summary + bandar detector for a symbol on a specific date."""
+        return self._get(f"/marketdetectors/{symbol}", params={"from": date, "to": date})
 
     def running_trade(self, symbol: str) -> dict:
         """Running trade / order flow chart data."""

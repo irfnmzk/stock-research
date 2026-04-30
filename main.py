@@ -2,6 +2,7 @@
 
 import argparse
 import sys
+from pathlib import Path
 
 import yaml
 
@@ -115,6 +116,28 @@ def cmd_trades(args, cfg):
 def cmd_set_stop(args, cfg):
     from portfolio import cmd_set_stop as _cmd_set_stop
     _cmd_set_stop(args, cfg)
+
+
+def cmd_backfill(args, cfg):
+    """Backfill historical prices and/or broker summary data."""
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(Path(__file__).parent / "data" / "backfill.log"),
+            logging.StreamHandler(),
+        ],
+    )
+    from backfill import backfill_prices, backfill_brokers
+
+    do_all = not args.prices and not args.brokers  # if neither flag, do both
+
+    if args.prices or do_all:
+        backfill_prices(cfg, start_date=args.start, end_date=args.end)
+
+    if args.brokers or do_all:
+        backfill_brokers(cfg, start_date=args.start, end_date=args.end, batch_pause=args.delay)
 
 
 def cmd_fetch_all(args, cfg):
@@ -373,6 +396,14 @@ def cli():
     p.add_argument("symbol", help="ticker")
     p.add_argument("price", type=float, help="stop loss price")
 
+    # backfill
+    p = sub.add_parser("backfill", help="backfill historical prices and/or broker data")
+    p.add_argument("--start", default="2020-01-01", help="start date (default: 2020-01-01)")
+    p.add_argument("--end", default=None, help="end date (default: today)")
+    p.add_argument("--prices", action="store_true", help="backfill prices only")
+    p.add_argument("--brokers", action="store_true", help="backfill broker summary only")
+    p.add_argument("--delay", type=float, default=0.5, help="pause between dates in seconds (default: 0.5)")
+
     args = parser.parse_args()
     cfg = load_config(args.config)
 
@@ -402,6 +433,7 @@ def cli():
         "portfolio": cmd_portfolio,
         "trades": cmd_trades,
         "set-stop": cmd_set_stop,
+        "backfill": cmd_backfill,
     }
     commands[args.command](args, cfg)
 

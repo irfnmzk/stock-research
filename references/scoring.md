@@ -1,144 +1,108 @@
-# Signal Scoring Algorithm
+# Signal Base Rate System
 
-The signal scoring engine (`signals.py`) computes a single numeric score per stock by evaluating 7 signal categories with configurable weights, then applying a macro regime modifier.
+The old composite scoring system (weighted points, macro modifier, star ratings) has been replaced with a base rate measurement approach. The system measures signal performance from historical data and shows raw stats. User evaluates and decides.
 
-## Scoring Categories
+## Philosophy
 
-### 1. Whale / Bandar Accumulation (weight: 1.0)
+- System measures, user scores
+- No composite score, no magic numbers
+- Show hit rate, avg return, sample size per signal
+- Rank stocks by number of active signals with decent hit rate (>55%)
+- Context (trend, regime) shown as labels, not modifiers
 
-Source: `bandar_detector` + `whale_scores` tables
+## Signal Categories
 
-| Condition | Points |
-|-----------|--------|
-| Top-5 broker net buy (latest day) | +1.0 |
-| Multi-day accumulation (2+ consecutive days net buy) | +0.5 |
-| Whale composite score > 0.7 | +0.5 |
-| Whale composite score < 0.3 | warning (no points) |
-| Top-5 broker distributing | warning (no points) |
+### Broker Signals (from broker_summary + bandar_detector)
 
-### 2. Foreign Flow (weight: 1.5)
+1. **Broker Timing Score** — per (broker, stock) pair, rolling hit rate and avg forward return after net buy days
+2. **Accumulation Streak** — consecutive net buy days per broker per stock
+3. **Broker Concentration** — top broker net value / total value
+4. **Buyer Seller Imbalance** — buyer/seller ratio + price direction
+5. **Acc/Dist Phase** — slope of top5 accdist over 5/10/20 days
+6. **Silent Accumulation** — smart broker buying + price flat (< 2% change)
+7. **Distribution Warning** — smart broker flips to net sell near recent high
+8. **Broker Agreement** — count of top N brokers on same side
+9. **Order Flow Profile** — avg value per transaction (institutional vs retail)
+10. **Foreign vs Domestic Alignment** — foreign net vs smart broker direction
 
-Source: `prices` table (foreign_buy, foreign_sell)
+### Technical Signals (from indicators + support_resistance)
 
-| Condition | Points |
-|-----------|--------|
-| 5-day net foreign buy > 0 | +1.5 |
-| 3-day net positive but 5-day still negative (turning) | +0.45 (1.5 × 0.3) |
-| Single-day foreign flow spike ≥ 50B IDR (inflow) | +0.45 (1.5 × 0.3) |
-| 5-day net sell > 5B IDR | warning |
+1. **RSI** — oversold (< 30) / overbought (> 70)
+2. **MACD** — signal line crossover
+3. **EMA Crossover** — EMA20/50 golden cross / death cross
+4. **Volume Spike** — volume ratio > 2x average
+5. **Bollinger Band** — squeeze then expansion/breakout
+6. **S/R Break** — price breaks computed support/resistance levels
 
-### 3. RSI (weight: 0.5)
+### Gap-Filling Metrics
 
-Source: `indicators` table
+- **Liquidity Gate & Discount** — 500M IDR hard floor + percentile-based multiplier within pool
+- **Cross-Stock Broker Flow** — broker sells A, buys B same day (rotation detection)
+- **Corporate Action Adjustment** — flag splits, rights, dividends that distort signals
+- **Market-Wide Broker Sentiment** — aggregate smart broker net across all stocks
 
-| Condition | Points |
-|-----------|--------|
-| RSI < 30 (oversold) | +1.0 (0.5 × 2) |
-| RSI 30-40 (low) | +0.5 |
-| RSI > 70 (overbought) | warning |
+## How Base Rates Are Measured
 
-### 4. Volume (weight: 0.5)
+For each (signal, stock) pair:
+1. Scan full history (Jan 2020 to present)
+2. Find every occurrence of the signal
+3. Measure 5/10/20 day forward returns after each occurrence
+4. Output: hit rate (% positive), avg return, sample size (n)
 
-Source: `indicators` table (volume_ratio)
+Signal combinations (e.g. broker accumulation + volume spike) measured as their own signal.
 
-| Condition | Points |
-|-----------|--------|
-| Volume ratio > 2.5x | +1.0 (0.5 × 2) |
-| Volume ratio > 2.0x | +0.5 |
+## Context Layers (not scored, shown as labels)
 
-### 5. MACD Momentum
+### Market Regime
+- risk_on / cautious / risk_off
+- Based on: IHSG trend, foreign flow direction, USD/IDR, US 10Y
 
-Source: `indicators` table (macd_hist, 2-day comparison)
+### Stock Trend (EMA stack)
+- ↗️ uptrend: EMA20 > EMA50 > EMA200
+- ↘️ downtrend: EMA20 < EMA50 < EMA200
+- ➡️ sideways: mixed
 
-| Condition | Points |
-|-----------|--------|
-| MACD histogram turning up from negative | +0.3 |
-
-### 6. Price vs Support/Resistance (weight: 1.0)
-
-Source: `support_resistance` + `prices` tables
-
-| Condition | Points |
-|-----------|--------|
-| Price within 3% above nearest support | +1.0 |
-| Price within 1% above support | +0.5 bonus |
-| Breakout above resistance on volume (ratio > 1.5x) | +0.5 |
-
-### 7. EMA Alignment
-
-Source: `indicators` table (ema20, ema50)
-
-| Condition | Points |
-|-----------|--------|
-| Price testing EMA20 (within 2%) | +0.3 |
-| Price testing EMA50 (within 2%) | +0.3 |
-
-### 8. Sector Momentum (weight: 0.5)
-
-Source: `sector_rotation` table
-
-| Condition | Points |
-|-----------|--------|
-| Stock's sector ranked top-3 (5-day) | +0.5 |
-| Sector momentum score > 3 | +0.25 (0.5 × 0.5) |
-
-### 9. Macro Regime Modifier
-
-Applied last, shifts the total score based on overall market environment.
-
-| Regime | Modifier |
-|--------|----------|
-| risk_on | +0.5 |
-| cautious | 0.0 |
-| risk_off | -1.0 |
-
-## Score Calculation
+## Screener Output Format
 
 ```
-raw_score = sum of all category points
-final_score = max(0, raw_score + macro_modifier)
-final_score = round to nearest 0.5
+📡 Scanner — 30 Apr 2026
+Regime: risk_off | IHSG 6,940 | Foreign -5.2T/5d
+
+$BBNI ↗️ — 3 signals
+• ZP accumulating 5d
+• Volume spike + broker buy
+• RSI oversold (32)
+
+$TAPG ➡️ — 2 signals
+• CC net buy 3d
+• BB squeeze breakout
 ```
 
-## Score Interpretation
+Only signals with >55% hit rate shown. Ranked by signal count.
+Low sample size (n < 15) gets ⚠️ warning.
 
-| Score | Action |
-|-------|--------|
-| ≥ 4.0 (threshold + 1) | STRONG BUY signal - consider entry |
-| ≥ 3.0 (threshold) | BUY signal - good entry if fits plan |
-| ≥ 2.0 (threshold - 1) | WATCH - building but not ready |
-| ≥ 1.0 | HOLD - weak signal, wait for confirmation |
-| < 1.0 | NO SIGNAL - stay away or wait |
+## Drill-Down (on demand)
 
-The threshold is configurable via `signals.score_threshold` in config.yaml (default: 3.0).
-
-## Maximum Theoretical Score
-
-If all signals fire at maximum:
-- Whale: 1.0 + 0.5 + 0.5 = 2.0
-- Foreign: 1.5 + 0.45 = 1.95
-- RSI: 1.0
-- Volume: 1.0
-- MACD: 0.3
-- Support: 1.0 + 0.5 = 1.5
-- EMA: 0.3 + 0.3 = 0.6
-- Sector: 0.5 + 0.25 = 0.75
-- Macro: 0.5
-
-**Max = ~9.55** (rounded to 9.5)
-
-In practice, scores above 5.0 are rare and very strong signals.
-
-## Display Format
-
+When user asks for detail on a stock, show full stats per signal:
 ```
-BBNI [Perbankan]: ★★★★☆ (4.0)
-  ✓ Foreign net buy 5d: +12.3B
-  ✓ Bandar net buy +5.2B
-  ✓ Multi-day accumulation (2+ days)
-  ✓ RSI low (38)
-  ✗ Macro cautious penalty (0)
-  → BUY signal - good entry if fits plan
+ZP accumulating on BBNI
+→ 47 past occurrences, 66% up after 10d, avg +2.8%
 ```
 
-Stars (★/☆) represent filled/empty out of 5. Signals (✓) are bullish factors, warnings (✗) are bearish factors.
+## Liquidity Tiers
+
+Percentile rank within 300-stock pool by 20-day avg daily value:
+- Top quartile (75-100th pctl): no discount
+- 50-75th: mild discount (~0.85x)
+- 25-50th: moderate discount (~0.65x)
+- Bottom quartile: heavy discount (~0.4x) or exclude
+- Hard floor: 500M IDR/day (safety net for dead stocks)
+
+Multipliers to be calibrated from backtest results.
+
+## Signal Log (self-tracking)
+
+Every scanner output logged with:
+- date, stock, active signals, trend state, regime
+- Auto-filled with 5/10/20 day forward returns as days pass
+- Answers: does the system actually surface good opportunities?
