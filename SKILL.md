@@ -195,6 +195,7 @@ See [references/pipeline.md](references/pipeline.md) for full data flow details.
 
 ## Key References
 
+- [PLAN.md](PLAN.md) - **Unified build plan** for standalone agent + signal measurement system. Covers: funnel-based scanner (replaces binary screener), ~17 state-change signals with base rates, S/R via swing point clustering, per-ticker smart broker ranking, change detection, broker narrative, agent architecture (6 tools, 3 memory tables incl. ticker_history), daily workflow, US stock support (TBD). This is the authoritative plan — read it before building anything.
 - [references/telegram-media-caption.md](references/telegram-media-caption.md) - Gateway MEDIA: caption limitation and workarounds
 - [references/schema.md](references/schema.md) - Database schema (21 tables), column definitions, common SQL query patterns
 - [references/pipeline.md](references/pipeline.md) - End-to-end data flow, computed data details, daily workflow
@@ -206,6 +207,19 @@ See [references/pipeline.md](references/pipeline.md) for full data flow details.
 For complex analysis beyond CLI commands, read `references/schema.md` for direct SQL queries against the SQLite database.
 
 ## Pitfalls
+
+### Broker Score Scaling Bug (mid-caps)
+In `whale.py`, `broker_score` divides `total_net` by `1e11` (100B). For mid-cap stocks under 10K IDR, smart broker activity of 5-10B is significant but scores near zero with this divisor. The `whale_accumulation` screener rule (`composite_score > 0.6`) effectively never triggers for mid-caps because the broker component is negligible. Fix: scale relative to the stock's avg daily traded value, or use `1e9`-`1e10` range. This is tracked in PLAN.md Phase 1 Step 1.
+
+### Scanner Architecture Direction
+The project is transitioning from binary screener rules to a **funnel-based scanner**. The old approach (5 pass/fail rules) is being replaced by: compute all ~17 signals on all 300 stocks → count signals per stock → rank → top 3-5. Read PLAN.md before making changes to screener.py or signals.py — the architecture is changing significantly.
+
+Key principles:
+- **Signals are state changes, not states.** "Price above EMA50" is useless (true for 150 stocks). "Price just reclaimed EMA50" is a signal. Each fires on the transition day only.
+- **Describe, don't interpret.** The LLM narrates factual state changes but never calls patterns ("bull flag") or gives directional opinions. Vision describes charts factually — the trader brings discretionary judgment.
+- **Narrate, don't score.** Base rates provide context, never a combined probability or auto-trade signal.
+- **Aggressive filtering.** Scanner outputs 3-5 stocks max, some days zero. The goal is a shortlist worth opening charts for, not a spreadsheet.
+- **S/R via swing point clustering.** Swing highs/lows (N=5 bars each side), clustered within 2%, ranked by touch count, nearest 2-3 zones above/below price. Lookback 6-12 months.
 
 ### SQLite Concurrent Access
 The backfill process and EOD cron can run simultaneously, causing `sqlite3.OperationalError: database is locked`. Two fixes applied:

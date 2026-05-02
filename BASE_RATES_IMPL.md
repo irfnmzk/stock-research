@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS signal_events (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     symbol          TEXT NOT NULL,
     date            TEXT NOT NULL,
-    signal_type     TEXT NOT NULL,    -- e.g. 'broker_timing', 'accumulation_streak'
+    signal_type     TEXT NOT NULL,    -- 'broker_timing', 'silent_accumulation', 'distribution_warning'
     broker_code     TEXT,             -- real column, indexed, not buried in JSON
     magnitude       REAL,             -- signal strength (streak length, concentration %, RSI value)
     close           REAL,             -- price at signal time (denormalized)
@@ -56,7 +56,7 @@ CREATE UNIQUE INDEX idx_se_dedup ON signal_events(symbol, date, signal_type, bro
 
 **Why `filled_through` instead of boolean?** Recent events may have 5d returns filled but not 20d yet. This tracks partial fills.
 
-**Estimated size:** 2-4M rows for broker signals, 200-500K for other metrics. SQLite handles this fine.
+**Estimated size:** 2-4M rows for broker_timing, ~500K for silent_accumulation and distribution_warning combined. SQLite handles this fine.
 
 ### signal_base_rates
 
@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS signal_base_rates (
 
 ### broker_rankings
 
-Three-level hierarchy for smart broker identification. This is an INPUT for metrics 2, 6, 7, 8, 10.
+Three-level hierarchy for smart broker identification. This is an INPUT for metrics 6 and 7.
 
 ```sql
 CREATE TABLE IF NOT EXISTS broker_rankings (
@@ -170,43 +170,6 @@ def get_smart_brokers(db, symbol, sector=None)
     # Fallback lookup: ticker -> sector -> global
     # Returns list of broker_codes marked is_smart
 
-# --- Metric 2: Accumulation Streak ---
-def scan_accumulation_streak(db, cfg)
-    # For each smart broker (from broker_rankings) on each stock:
-    #   - Find consecutive net buy days (net_value > 0)
-    #   - Signal fires on day 2+ of streak
-    #   - magnitude = streak length
-    #   - meta: cumulative net_value over streak
-    #   - signal_type = 'accumulation_streak'
-
-# --- Metric 3: Broker Concentration ---
-def scan_broker_concentration(db, cfg)
-    # For each (symbol, date) in bandar_detector:
-    #   - concentration = abs(top1_net) / total_value
-    #   - Signal fires when concentration > threshold (e.g. 0.20)
-    #   - magnitude = concentration ratio
-    #   - broker_code = NULL (aggregate signal)
-    #   - signal_type = 'broker_concentration'
-
-# --- Metric 4: Buyer Seller Imbalance ---
-def scan_buyer_seller_imbalance(db, cfg)
-    # For each (symbol, date) in bandar_detector:
-    #   - ratio = total_buyers / total_sellers (handle zero)
-    #   - Signal fires when ratio > 2.0 (buy imbalance) or < 0.5 (sell imbalance)
-    #   - magnitude = ratio
-    #   - signal_type = 'buyer_seller_imbalance'
-
-# --- Metric 5: Acc/Dist Phase ---
-def scan_accdist_phase(db, cfg)
-    # Map accdist labels to numeric:
-    #   Big Acc=3, Normal Acc=2, Small Acc=1, Neutral=0,
-    #   Small Dist=-1, Normal Dist=-2, Big Dist=-3
-    # For each (symbol, date), compute slope of top5_accdist over last 10 days
-    # Signal fires on phase TRANSITION (slope flips sign)
-    #   - magnitude = slope value
-    #   - meta: from_phase, to_phase
-    #   - signal_type = 'accdist_phase_change'
-
 # --- Metric 6: Silent Accumulation ---
 def scan_silent_accumulation(db, cfg)
     # For each (symbol, date):
@@ -225,45 +188,14 @@ def scan_distribution_warning(db, cfg)
     #   - magnitude = net sell value
     #   - signal_type = 'distribution_warning'
 
-# --- Metric 8: Broker Agreement ---
-def scan_broker_agreement(db, cfg)
-    # For each (symbol, date):
-    #   - Count smart brokers with net_value > 0 (buy side)
-    #   - Count smart brokers with net_value < 0 (sell side)
-    #   - Signal fires when buy_count >= 3 or sell_count >= 3
-    #   - magnitude = count on dominant side
-    #   - meta: list of agreeing broker codes, direction (buy/sell)
-    #   - signal_type = 'broker_agreement'
-
-# --- Metric 9: Order Flow Profile ---
-def scan_order_flow_profile(db, cfg)
-    # For each (broker, stock, date) in broker_summary:
-    #   - avg_txn_size = (buy_value + sell_value) / freq
-    #   - Classify: institutional (top 10th percentile of avg_txn_size for that stock)
-    #   - Signal fires when institutional-sized flow detected with net direction
-    #   - magnitude = avg_txn_size
-    #   - signal_type = 'institutional_flow'
-    # This can feed into metric 1 as a filter (only count timing when flow is institutional)
-
-# --- Metric 10: Foreign vs Domestic Alignment ---
-def scan_foreign_domestic_alignment(db, cfg)
-    # For each (symbol, date):
-    #   - foreign_net = foreign_buy - foreign_sell (from prices)
-    #   - smart_net = sum of net_value for smart brokers (from broker_summary)
-    #   - Signal fires when they DISAGREE (one positive, one negative)
-    #   - magnitude = abs difference
-    #   - meta: foreign_direction, smart_direction, foreign_net, smart_net
-    #   - signal_type = 'foreign_domestic_divergence'
-    # Forward returns tell us who was right
-
 # --- Main Pipeline ---
 def compute_all_base_rates(db, cfg)
     # Full pipeline:
     # 1. scan_broker_timing (all brokers)
     # 2. fill_forward_returns for broker_timing
     # 3. compute_broker_rankings (produces smart broker lists)
-    # 4. scan metrics 3, 4, 5 (independent)
-    # 5. scan metrics 2, 6, 7, 8, 9, 10 (depend on smart broker rankings)
+    # 4. scan_silent_accumulation (metric 6, needs rankings)
+    # 5. scan_distribution_warning (metric 7, needs rankings)
     # 6. fill_forward_returns for all remaining
     # 7. aggregate_base_rates for all signal types
 ```
@@ -293,67 +225,15 @@ def compute_all_base_rates(db, cfg)
 
 ### Metric 2: Accumulation Streak
 
-**Purpose:** Does conviction (consecutive buying days) predict better returns than single-day buys?
+**Status:** Deferred. Heavily overlaps with metric 6 (silent accumulation). Can add later if base rates from 1/6/7 leave gaps.
 
-**Detection logic:**
-- For each smart broker (from broker_rankings) on each stock
-- Track consecutive days where net_value > 0
-- Signal fires on day 2, 3, 4, 5+ of streak (one event per day of streak)
-- magnitude = current streak length
-- meta: cumulative_net_value over the streak
+### Metrics 3, 4, 5: Broker Concentration / Buyer-Seller Imbalance / Acc-Dist Phase
 
-**Key question answered:** Is a 5-day streak meaningfully better than a 2-day streak? Or does the move already happen by day 3?
+**Status:** Removed. These are lossy summaries of the same broker_summary data that metrics 1/6/7 already use directly. Adding them would increase noise without independent signal value.
 
-**Depends on:** broker_rankings (metric 1 must complete first)
+### Metrics 8, 9, 10: Broker Agreement / Order Flow Profile / Foreign-Domestic Divergence
 
-### Metric 3: Broker Concentration
-
-**Purpose:** When one broker dominates the day's flow, is that predictive?
-
-**Detection logic:**
-- For each (symbol, date) in bandar_detector
-- concentration = abs(top1_net) / total_value
-- Signal fires when concentration > 0.20 (top broker is >20% of total flow)
-- magnitude = concentration ratio (0.0 to 1.0)
-- meta: direction (top1_net positive = buy concentration, negative = sell concentration)
-
-**Independent:** Uses bandar_detector only, no smart broker list needed.
-
-**Note:** total_value can be 0 on very low-volume days. Skip those.
-
-### Metric 4: Buyer Seller Imbalance
-
-**Purpose:** When buyer count vastly exceeds seller count (or vice versa), does it predict direction?
-
-**Detection logic:**
-- For each (symbol, date) in bandar_detector
-- ratio = total_buyers / max(total_sellers, 1)
-- Signal fires when ratio > 2.0 (buy imbalance) or ratio < 0.5 (sell imbalance)
-- magnitude = ratio
-- meta: direction ('buy_imbalance' or 'sell_imbalance'), total_buyers, total_sellers
-
-**Independent:** Uses bandar_detector only.
-
-**Interesting case:** High buyer count + flat price = supply absorption (accumulation). High buyer count + price up = momentum. Base rates will differentiate.
-
-### Metric 5: Acc/Dist Phase Change
-
-**Purpose:** Does a transition from distribution to accumulation (or vice versa) predict price moves?
-
-**Detection logic:**
-- Map accdist labels to numeric scale:
-  - Big Acc = 3, Normal Acc = 2, Small Acc = 1
-  - Neutral = 0
-  - Small Dist = -1, Normal Dist = -2, Big Dist = -3
-- For each (symbol, date), look at top5_accdist over last 10 days
-- Compute slope (linear regression or simple difference)
-- Signal fires when slope flips sign (phase transition)
-- magnitude = new slope value (positive = shifting to accumulation)
-- meta: from_label, to_label
-
-**Independent:** Uses bandar_detector only.
-
-**Note:** accdist values in the DB are stored as TEXT labels, not numbers. The mapping happens in code.
+**Status:** Deferred. Broker agreement (8) is cheap to add later as a confidence filter. Order flow (9) and foreign-domestic (10) can be revisited if the core 3 metrics leave gaps.
 
 ### Metric 6: Silent Accumulation
 
@@ -391,52 +271,7 @@ def compute_all_base_rates(db, cfg)
 
 **Note:** Forward returns here should be NEGATIVE if the signal works. Hit rate = % of times price dropped.
 
-### Metric 8: Broker Agreement
 
-**Purpose:** Does consensus among smart brokers improve signal quality?
-
-**Detection logic:**
-- For each (symbol, date):
-  1. Get smart brokers from broker_rankings
-  2. For each, check broker_summary net_value direction
-  3. Count buy-side (net > 0) and sell-side (net < 0)
-  4. Signal fires when max(buy_count, sell_count) >= 3
-- magnitude = count on dominant side
-- meta: direction ('buy'/'sell'), agreeing_brokers list, total_smart_active
-
-**Depends on:** broker_rankings (metric 1)
-
-**Key question:** Is 5/7 brokers agreeing meaningfully better than 3/7? Or is 3 already enough?
-
-### Metric 9: Order Flow Profile
-
-**Purpose:** Distinguish institutional from retail flow. Institutional flow is presumably more informed.
-
-**Detection logic:**
-- For each (broker, stock, date) in broker_summary where freq > 0:
-  - avg_txn_size = (buy_value + sell_value) / freq
-- Compute 90th percentile of avg_txn_size per stock (across all dates and brokers)
-- Signal fires when a broker's avg_txn_size exceeds the 90th percentile AND has a net direction
-- magnitude = avg_txn_size
-- meta: percentile_rank, net_direction, broker_code
-
-**Can feed into metric 1:** Filter broker_timing events to only institutional-sized flow and see if hit rates improve.
-
-### Metric 10: Foreign vs Domestic Divergence
-
-**Purpose:** When foreign investors and smart domestic brokers disagree, who's right?
-
-**Detection logic:**
-- For each (symbol, date):
-  1. foreign_net = foreign_buy - foreign_sell (from prices table)
-  2. smart_net = sum of net_value for smart brokers (from broker_summary)
-  3. Signal fires when they disagree: (foreign_net > 0 AND smart_net < 0) OR (foreign_net < 0 AND smart_net > 0)
-- magnitude = abs(foreign_net - smart_net)
-- meta: foreign_net, smart_net, foreign_direction, smart_direction
-
-**Depends on:** broker_rankings (metric 1)
-
-**Output tells you:** For each stock, when they disagree, does following foreign or domestic produce better returns? This calibrates the weight of foreign flow vs bandarmology per ticker.
 
 ---
 
@@ -445,12 +280,12 @@ def compute_all_base_rates(db, cfg)
 Add to main.py:
 
 ```
-compute-base-rates [--signal TYPE] [--symbol SYM]
+compute-base-rates [--signal TYPE]
     Run full base rate pipeline or specific signal type.
-    Without args: runs all metrics in order.
+    Without args: runs all 3 metrics in order.
     --signal broker_timing: only metric 1
-    --signal independent: metrics 3, 4, 5
-    --signal dependent: metrics 2, 6, 7, 8, 9, 10
+    --signal silent_accumulation: only metric 6
+    --signal distribution_warning: only metric 7
 
 broker-rank SYMBOL
     Show per-ticker broker rankings with stats.
@@ -466,23 +301,16 @@ base-rates [--signal TYPE] [--symbol SYM] [--min-sample N]
 ## Execution Order
 
 ```
-1. scan_broker_timing()           -- all brokers, all stocks, all dates
+1. scan_broker_timing()              -- all brokers, all stocks, all dates
 2. fill_forward_returns('broker_timing')
-3. compute_broker_rankings()      -- produces smart broker lists at 3 levels
-4. scan_broker_concentration()    -- metric 3 (independent)
-5. scan_buyer_seller_imbalance()  -- metric 4 (independent)
-6. scan_accdist_phase()           -- metric 5 (independent)
-7. scan_accumulation_streak()     -- metric 2 (needs rankings)
-8. scan_silent_accumulation()     -- metric 6 (needs rankings)
-9. scan_distribution_warning()    -- metric 7 (needs rankings)
-10. scan_broker_agreement()       -- metric 8 (needs rankings)
-11. scan_order_flow_profile()     -- metric 9
-12. scan_foreign_domestic()       -- metric 10 (needs rankings)
-13. fill_forward_returns()        -- all remaining events
-14. aggregate_base_rates()        -- compute stats for all signal types
+3. compute_broker_rankings()         -- produces smart broker lists at 3 levels
+4. scan_silent_accumulation()        -- metric 6 (needs rankings)
+5. scan_distribution_warning()       -- metric 7 (needs rankings)
+6. fill_forward_returns()            -- all remaining events
+7. aggregate_base_rates()            -- compute stats for all signal types
 ```
 
-**Estimated total runtime:** 15-30 minutes (mostly step 1 scanning 12.6M rows).
+**Estimated total runtime:** 10-20 minutes (mostly step 1 scanning 12.6M rows).
 
 ---
 
@@ -572,6 +400,8 @@ These are starting points. Adjust after inspecting the distribution.
 5. **Fixed forward return columns (5/10/20d).** Simpler than a separate table. Unlikely to need other windows.
 
 6. **Dedup index on (symbol, date, signal_type, broker_code).** Prevents duplicate events on re-runs. INSERT OR IGNORE handles gracefully.
+
+7. **Focus on 3 core metrics (1, 6, 7) instead of 10.** All broker metrics derive from the same underlying data. More metrics = more correlated noise, not more signal. Additional metrics (technical base rates, broker agreement) can be added later if these three leave gaps.
 
 ---
 
