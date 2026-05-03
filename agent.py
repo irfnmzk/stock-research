@@ -7,6 +7,7 @@ Two entry points:
 
 import base64
 import json
+import logging
 import os
 from pathlib import Path
 
@@ -21,6 +22,7 @@ from system_prompt import build_eod_prompt, build_chat_prompt
 from tools import TOOL_DEFINITIONS, handle_tool
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+log = logging.getLogger(__name__)
 
 
 def _extract_text(content):
@@ -128,6 +130,7 @@ def run_conversation(cfg, user_message, session_id=None):
 
     while turns < max_turns:
         turns += 1
+        log.info("turn %d/%d", turns, max_turns)
 
         response = client.messages.create(
             model=model,
@@ -145,6 +148,7 @@ def run_conversation(cfg, user_message, session_id=None):
             tool_results = []
             for block in assistant_content:
                 if block.type == "tool_use":
+                    log.info("tool_call: %s(%s)", block.name, json.dumps(block.input, ensure_ascii=False)[:200])
                     result = handle_tool(cfg, block.name, block.input)
 
                     # Check for chart image
@@ -152,6 +156,8 @@ def run_conversation(cfg, user_message, session_id=None):
                         path = result.split(":", 1)[1]
                         chart_paths.append(path)
                         result = f"Chart generated: {Path(path).name}"
+
+                    log.info("tool_result: %s → %s", block.name, str(result)[:300])
 
                     tool_results.append({
                         "type": "tool_result",

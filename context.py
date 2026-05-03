@@ -153,6 +153,32 @@ def _section_scanner(data):
     return "\n".join(lines)
 
 
+def _section_news(db, cfg):
+    from datetime import datetime, timedelta
+    cutoff = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
+    watchlist = [s.replace(".JK", "") for s in cfg.get("watchlist", [])]
+    if not watchlist:
+        return ""
+
+    placeholders = ",".join("?" for _ in watchlist)
+    rows = db.execute(
+        f"""SELECT symbol_queried, title, published_at
+            FROM news
+            WHERE symbol_queried IN ({placeholders}) AND published_at >= ?
+            ORDER BY published_at DESC LIMIT 10""",
+        (*watchlist, cutoff),
+    ).fetchall()
+
+    if not rows:
+        return ""
+
+    lines = ["Recent news:"]
+    for r in rows:
+        date = r["published_at"][:10] if r["published_at"] else ""
+        lines.append(f"  [{date}] {r['symbol_queried']}: {r['title']}")
+    return "\n".join(lines)
+
+
 def _section_theses(db):
     theses = get_all_theses(db)
     if not theses:
@@ -185,6 +211,7 @@ def build_context(cfg):
         _section_portfolio(data),
         _section_watchlist(data),
         _section_scanner(data),
+        _section_news(db, cfg),
         _section_theses(db),
         _section_summaries(db),
     ]

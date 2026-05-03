@@ -49,7 +49,7 @@ class TokenManager:
             self.access_token = data.get("access_token")
             self.refresh_token = data.get("refresh_token")
             self.expires_at = data.get("expires_at", 0)
-        if env_rt:
+        if env_rt and not self.refresh_token:
             self.refresh_token = env_rt
 
     def _save(self):

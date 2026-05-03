@@ -19,6 +19,37 @@ TOOL_DEFINITIONS = [
         },
     },
     {
+        "name": "news",
+        "description": "Get recent news and catalysts for a stock. Returns headlines from the last 7 days.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Stock ticker symbol"},
+                "days": {"type": "integer", "description": "Number of days to look back (default 7)", "default": 7},
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "research",
+        "description": "Search the web for recent news, catalysts, and analysis. Use for earnings, macro events, sector trends, or any topic not in the local database. Powered by Exa semantic search.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query_type": {
+                    "type": "string",
+                    "enum": ["ticker", "sector", "macro", "custom"],
+                    "description": "Type of research: ticker (company news), sector (industry trends), macro (global/Indonesia macro), custom (free-form query)",
+                },
+                "symbol": {"type": "string", "description": "Stock ticker symbol (required for ticker type)"},
+                "sector": {"type": "string", "description": "Sector name: banking, coal, nickel, telco, consumer, property, energy (for sector type)"},
+                "query": {"type": "string", "description": "Free-form search query (for custom type)"},
+                "days": {"type": "integer", "description": "Days to look back (default 7)", "default": 7},
+            },
+            "required": ["query_type"],
+        },
+    },
+    {
         "name": "chart",
         "description": "Generate a price chart for a stock. Returns the chart image.",
         "input_schema": {
@@ -40,7 +71,27 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "query_db",
-        "description": "Run a read-only SQL query against the research database. Tables: prices, indicators, signal_events, signal_base_rates, broker_summary, companies, scan_pool, support_resistance, sector_rotation.",
+        "description": (
+            "Run a read-only SQL query against the research database. Schema:\n"
+            "prices(symbol, date, open, high, low, close, volume, value, foreign_buy, foreign_sell, market_cap)\n"
+            "indicators(symbol, date, rsi, ema20, ema50, ema200, macd, macd_hist, bb_upper, bb_lower, bb_width, atr, volume_ratio, smart_broker_streak, bb_squeeze_days, accdist_slope_5d/10d/20d)\n"
+            "broker_summary(symbol, date, broker_code, buy_lot, sell_lot, net_lot, net_value, avg_price)\n"
+            "bandar_detector(symbol, date, top1_net, top3_net, top5_net, top10_net, top1_accdist, top3_accdist, total_buyers, total_sellers)\n"
+            "signal_events(symbol, date, signal_type, broker_code, magnitude, close, volume_ratio, regime, trend, fwd_5d, fwd_10d, fwd_20d)\n"
+            "signal_base_rates(signal_type, direction, symbol, broker_code, sample_size, hit_rate_5d/10d/20d, avg_return_5d/10d/20d)\n"
+            "signals(symbol, date, signal_type, direction, score, description)\n"
+            "companies(symbol, name, sector_name, subsector_name, market_cap, last_price, avg_volume)\n"
+            "fundamentals(symbol, date, pe_ttm, pe_forward, pbv, ev_ebitda, dividend_yield, earnings_yield)\n"
+            "news(symbol_queried, title, content, source, url, published_at, total_likes)\n"
+            "insider(symbol, name, date, action_type, change_shares, price, badge)\n"
+            "support_resistance(symbol, level, level_type, touch_count, strength_score)\n"
+            "sector_rotation(sector, date, pct_5d, pct_10d, pct_20d, rank_5d, rank_10d, rank_20d, momentum)\n"
+            "whale_scores(symbol, date, foreign_flow_score, broker_score, composite_score)\n"
+            "relative_strength(symbol, date, vs_ihsg_5d/10d/20d, vs_sector_5d/10d/20d)\n"
+            "positions(symbol, avg_cost, total_lots, stop_loss)\n"
+            "trades(symbol, date, action, lots, price, fees, notes)\n"
+            "scan_pool(symbol, market_cap, rank)"
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -71,6 +122,17 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "name": "refresh",
+        "description": "Fetch latest data for a single ticker from Stockbit (prices, broker summary) and recompute indicators, signals, and support/resistance. Call this before ticker_deep_dive when the user asks about a stock mid-day and needs fresh data.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Stock ticker symbol (e.g. BBNI, ITMG)"},
+            },
+            "required": ["symbol"],
+        },
+    },
 ]
 
 
@@ -78,11 +140,14 @@ def handle_tool(cfg, tool_name, tool_input):
     """Dispatch a tool call and return the result string."""
     handlers = {
         "ticker_deep_dive": _handle_deep_dive,
+        "news": _handle_news,
+        "research": _handle_research,
         "chart": _handle_chart,
         "portfolio": _handle_portfolio,
         "query_db": _handle_query_db,
         "note": _handle_note,
         "recall": _handle_recall,
+        "refresh": _handle_refresh,
     }
     handler = handlers.get(tool_name)
     if not handler:
@@ -170,6 +235,71 @@ def _handle_deep_dive(cfg, inp):
         lines.append(f"\nYour thesis: {thesis}")
 
     return "\n".join(lines)
+
+
+def _handle_news(cfg, inp):
+    from datetime import datetime, timedelta
+    symbol = inp["symbol"].upper()
+    days = inp.get("days", 7)
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    db = get_db(cfg)
+    rows = db.execute(
+        """SELECT title, source, published_at, url, total_likes
+           FROM news
+           WHERE symbol_queried = ? AND published_at >= ?
+           ORDER BY published_at DESC LIMIT 15""",
+        (symbol, cutoff),
+    ).fetchall()
+    db.close()
+
+    if not rows:
+        return f"No news for {symbol} in the last {days} days."
+
+    lines = [f"News for {symbol} (last {days}d):"]
+    for r in rows:
+        date = r["published_at"][:10] if r["published_at"] else ""
+        likes = f" ({r['total_likes']} likes)" if r["total_likes"] else ""
+        lines.append(f"  [{date}] {r['title']}{likes}")
+        if r["url"]:
+            lines.append(f"    {r['url']}")
+
+    return "\n".join(lines)
+
+
+def _handle_research(cfg, inp):
+    from research import research_ticker, research_sector, research_global_macro, exa_search, summarize_research
+    from db import get_db as _get_db
+
+    query_type = inp.get("query_type", "custom")
+    days = inp.get("days", 7)
+
+    if query_type == "ticker":
+        symbol = inp.get("symbol", "").upper()
+        if not symbol:
+            return "Symbol required for ticker research."
+        db = _get_db(cfg)
+        results = research_ticker(symbol, days_back=days, db=db)
+        db.close()
+    elif query_type == "sector":
+        sector = inp.get("sector", "")
+        if not sector:
+            return "Sector required. Options: banking, coal, nickel, telco, consumer, property, energy."
+        results = research_sector(sector, days_back=days)
+    elif query_type == "macro":
+        results = research_global_macro(days_back=days)
+    elif query_type == "custom":
+        query = inp.get("query", "")
+        if not query:
+            return "Query required for custom research."
+        results = exa_search(query, num_results=5, days_back=days)
+    else:
+        return f"Unknown query_type: {query_type}"
+
+    if not results:
+        return "No research results found."
+
+    return summarize_research(results)
 
 
 def _handle_chart(cfg, inp):
@@ -277,3 +407,56 @@ def _handle_recall(cfg, inp):
 
     db.close()
     return "\n".join(lines)
+
+
+def _handle_refresh(cfg, inp):
+    from datetime import datetime
+    from fetcher import fetch_prices, fetch_broker_summary
+    from indicators import compute_all as compute_indicators
+    from support_resistance import detect_all as compute_sr
+    from whale import compute_all as compute_whales
+    from temporal import compute_all as compute_temporal
+    from signal_engine import evaluate_all, log_signals
+    from macro import get_regime
+    from db import get_db as _get_db
+
+    symbol = inp["symbol"].upper()
+    syms = [symbol]
+
+    steps = []
+    try:
+        fetch_prices(cfg, symbols=syms, days=180)
+        steps.append("prices")
+        fetch_broker_summary(cfg, symbols=syms)
+        steps.append("brokers")
+    except Exception as e:
+        return f"Refresh failed during fetch: {e}"
+
+    try:
+        compute_indicators(cfg, symbols=syms)
+        steps.append("indicators")
+        compute_sr(cfg, symbols=syms)
+        steps.append("S/R")
+        compute_whales(cfg, symbols=syms)
+        steps.append("whale scores")
+        compute_temporal(cfg, symbols=syms)
+        steps.append("temporal")
+    except Exception as e:
+        return f"Refresh failed during compute ({', '.join(steps)} ok): {e}"
+
+    try:
+        db = _get_db(cfg)
+        regime = get_regime(db)
+        db.close()
+        signals = evaluate_all(cfg, symbols=syms)
+        db = _get_db(cfg)
+        log_signals(db, signals, regime=regime)
+        db.commit()
+        db.close()
+        steps.append("signals")
+    except Exception as e:
+        return f"Refresh failed during signals ({', '.join(steps)} ok): {e}"
+
+    now = datetime.now().strftime("%H:%M")
+    sig_count = len(signals.get(symbol, []))
+    return f"{symbol} refreshed at {now} ({', '.join(steps)}). {sig_count} active signal(s)."

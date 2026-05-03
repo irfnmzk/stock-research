@@ -7,6 +7,7 @@ Uses python-telegram-bot v21+ async API.
 import asyncio
 import logging
 import os
+import re
 import time
 from pathlib import Path
 
@@ -77,9 +78,25 @@ async def _keep_typing(chat, stop_event: asyncio.Event):
             continue
 
 
+_ALLOWED_TAGS = re.compile(r"</?(?:b|i|u|s|code|pre|a(?:\s[^>]*)?)>")
+
+
+def _sanitize_html(text):
+    """Escape &, <, > in text while preserving allowed Telegram HTML tags."""
+    parts = _ALLOWED_TAGS.split(text)
+    tags = _ALLOWED_TAGS.findall(text)
+    escaped = []
+    for i, part in enumerate(parts):
+        escaped.append(part.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+        if i < len(tags):
+            escaped.append(tags[i])
+    return "".join(escaped)
+
+
 async def _send_reply(message, text, charts=None):
     """Send text + optional charts. Single chart: text as caption. Multiple: text then album."""
     CAPTION_MAX = 1024
+    text = _sanitize_html(text)
 
     valid_charts = [Path(p) for p in (charts or []) if Path(p).exists()]
 
@@ -233,13 +250,13 @@ async def cmd_recall(update: Update, context: ContextTypes.DEFAULT_TYPE):
         symbol = args[1].upper()
         thesis = get_thesis(db, symbol)
         if thesis:
-            await update.message.reply_text(f"<b>{symbol}</b>: {thesis}", parse_mode=ParseMode.HTML)
+            await update.message.reply_text(f"<b>{symbol}</b>: {_sanitize_html(thesis)}", parse_mode=ParseMode.HTML)
         else:
             await update.message.reply_text(f"No thesis for {symbol}.")
     else:
         theses = get_all_theses(db)
         if theses:
-            lines = [f"<b>{t['symbol']}</b>: {t['thesis']}" for t in theses]
+            lines = [f"<b>{t['symbol']}</b>: {_sanitize_html(t['thesis'])}" for t in theses]
             await update.message.reply_text("\n\n".join(lines), parse_mode=ParseMode.HTML)
         else:
             await update.message.reply_text("No theses saved.")
@@ -288,6 +305,7 @@ async def trigger_eod_brief(cfg, app: Application):
 
     try:
         brief = generate_eod_brief(cfg)
+        brief = _sanitize_html(brief)
 
         for chunk in _split_message(brief):
             try:
