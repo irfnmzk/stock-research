@@ -5,6 +5,7 @@ today and yesterday for watchlist + scanner hits.
 """
 
 from db import get_db
+from signal_engine import display_name
 
 
 def detect_changes(cfg, date=None, symbols=None):
@@ -104,7 +105,7 @@ def _signal_changes(db, symbol, date, prev_date):
         changes.append({
             "symbol": symbol,
             "type": "new_signal",
-            "description": f"New signal: {s['signal_type']} ({s['trend']})",
+            "description": f"New signal: {display_name(s['signal_type'], s['trend'])}",
             "meta": {"signal_type": s["signal_type"], "direction": s["trend"]},
         })
 

@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 from db import get_db
 from memory import get_all_theses, get_recent_summaries
+from signal_engine import display_name
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 EOD_PATH = SCRIPT_DIR / "data" / "latest_eod.json"
@@ -110,7 +111,7 @@ def _section_watchlist(data):
         lines.append(line)
 
         for s in entry.get("signals", []):
-            sig_line = f"    signal: {s['signal_type']} ({s['direction']})"
+            sig_line = f"    signal: {display_name(s['signal_type'], s['direction'])}"
             if s.get("avg_return_10d"):
                 sig_line += f" — avg 10d return: {s['avg_return_10d']:+.2f}% (n={s.get('sample_size', '?')})"
             if s.get("description"):
@@ -138,7 +139,7 @@ def _section_scanner(data):
 
         lines.append(f"  {sym} ({sector}): {cnt} signals{ret_str}")
         for s in c.get("signals", []):
-            sig_line = f"    {s['type']} ({s['direction']})"
+            sig_line = f"    {display_name(s['type'], s['direction'])}"
             if s.get("avg_return_10d"):
                 sig_line += f" — avg 10d: {s['avg_return_10d']:+.2f}%"
             if s.get("description"):

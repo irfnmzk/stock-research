@@ -11,6 +11,21 @@ from db import get_db
 BROKER_SIG_THRESHOLD = 0.03      # 3% net significance to fire signal
 BROKER_INDIVIDUAL_THRESHOLD = 0.005  # 0.5% of turnover per broker
 
+SIGNAL_DISPLAY_NAMES = {
+    ("broker_significance", "bullish"): "Broker Accumulation",
+    ("broker_significance", "bearish"): "Broker Distribution",
+    ("buyer_seller_imbalance", "bullish"): "Absorption",
+    ("ema_cross", "bullish"): "EMA Cross",
+    ("macd_histogram_flip", "bullish"): "MACD Flip",
+    ("volume_spike", "bullish"): "Volume Spike",
+    ("bb_squeeze_release", "bullish"): "Squeeze Break",
+    ("sr_break", "bearish"): "Support Break",
+}
+
+
+def display_name(signal_type, direction):
+    return SIGNAL_DISPLAY_NAMES.get((signal_type, direction), signal_type)
+
 
 @dataclass
 class Signal:

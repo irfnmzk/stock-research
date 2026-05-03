@@ -3,6 +3,7 @@
 import json
 from db import get_db
 from memory import set_thesis, get_thesis, get_all_theses, get_recent_summaries
+from signal_engine import display_name
 
 
 TOOL_DEFINITIONS = [
@@ -149,7 +150,7 @@ def _handle_deep_dive(cfg, inp):
     if signals:
         lines.append(f"\nActive signals ({len(signals)}):")
         for s in signals:
-            line = f"  {s['signal_type']} ({s['direction']})"
+            line = f"  {display_name(s['signal_type'], s['direction'])}"
             if s.get("base_rate"):
                 br = s["base_rate"]
                 line += f" — avg 10d: {br['avg_return_10d']:+.2f}%, n={br['sample_size']} ({br['scope']})"

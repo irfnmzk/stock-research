@@ -80,17 +80,30 @@ def render_chart(cfg, symbol, days=90):
                 wdf["whale"], panel=3, color="#FF9800", ylabel="Whale", width=1.2,
             ))
 
-    # S/R lines
+    # S/R lines — only nearest 3 supports and 3 resistances within visible range
+    price_min = df["Low"].min()
+    price_max = df["High"].max()
+    current = df["Close"].iloc[-1]
+
     sr_rows = db.execute(
-        "SELECT level, level_type FROM support_resistance WHERE symbol = ?",
-        (symbol,),
+        "SELECT level, level_type, touch_count FROM support_resistance "
+        "WHERE symbol = ? AND level BETWEEN ? AND ? ORDER BY level",
+        (symbol, price_min * 0.95, price_max * 1.05),
     ).fetchall()
-    if sr_rows:
-        for sr in sr_rows:
-            level = sr["level"]
-            color = "#4CAF50" if sr["level_type"] == "support" else "#F44336"
-            hline_series = pd.Series(level, index=df.index)
-            add_plots.append(mpf.make_addplot(hline_series, color=color, linestyle="--", width=0.7))
+
+    supports = sorted(
+        [r for r in sr_rows if r["level_type"] == "support" and r["level"] < current],
+        key=lambda r: r["level"], reverse=True,
+    )[:3]
+    resistances = sorted(
+        [r for r in sr_rows if r["level_type"] == "resistance" and r["level"] > current],
+        key=lambda r: r["level"],
+    )[:3]
+
+    for sr in supports + resistances:
+        color = "#4CAF50" if sr["level_type"] == "support" else "#F44336"
+        hline_series = pd.Series(sr["level"], index=df.index)
+        add_plots.append(mpf.make_addplot(hline_series, color=color, linestyle="--", width=0.7))
 
     out_dir = Path(cfg["charts"]["output_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
