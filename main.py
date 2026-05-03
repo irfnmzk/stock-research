@@ -5,6 +5,9 @@ import sys
 from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 def load_config(path="config.yaml"):
@@ -60,11 +63,6 @@ def cmd_indicators(args, cfg):
 def cmd_sr(args, cfg):
     from support_resistance import detect_all
     detect_all(cfg, symbols=args.symbols)
-
-
-def cmd_screen(args, cfg):
-    from screener import run_screener
-    run_screener(cfg, rule=args.rule, use_pool=args.pool)
 
 
 def cmd_chart(args, cfg):
@@ -140,6 +138,58 @@ def cmd_backfill(args, cfg):
         backfill_brokers(cfg, start_date=args.start, end_date=args.end, batch_pause=args.delay)
 
 
+def cmd_agent_chat(args, cfg):
+    """Interactive agent chat in terminal."""
+    from agent import run_conversation, close_session
+    session_id = None
+    print("IDX Research Agent (type 'quit' to exit)")
+    print("-" * 40)
+    while True:
+        try:
+            msg = input("\nyou: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if not msg or msg.lower() in ("quit", "exit", "q"):
+            break
+        text, charts, session_id = run_conversation(cfg, msg, session_id=session_id)
+        print(f"\nagent: {text}")
+        if charts:
+            print(f"  [charts: {', '.join(charts)}]")
+    if session_id:
+        print("\nClosing session...")
+        close_session(cfg, session_id)
+    print("Done.")
+
+
+def cmd_send_brief(args, cfg):
+    """Generate and print EOD brief (or send via Telegram with --notify)."""
+    from agent import generate_eod_brief
+    brief = generate_eod_brief(cfg)
+    print(brief)
+
+    if args.notify:
+        import asyncio
+        import os
+        from bot import trigger_eod_brief
+        from telegram.ext import Application
+
+        token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        if not token:
+            print("\nError: TELEGRAM_BOT_TOKEN not set")
+            return
+        app = Application.builder().token(token).build()
+        asyncio.run(app.initialize())
+        asyncio.run(trigger_eod_brief(cfg, app))
+        asyncio.run(app.shutdown())
+        print("\nBrief sent via Telegram.")
+
+
+def cmd_bot(args, cfg):
+    """Start the Telegram bot."""
+    from bot import run_bot
+    run_bot()
+
+
 def cmd_fetch_all(args, cfg):
     """Run full daily fetch pipeline: prices, brokers, fundamentals, news."""
     from fetcher import fetch_prices, fetch_broker_summary, fetch_fundamentals
@@ -154,127 +204,6 @@ def cmd_fetch_all(args, cfg):
     print("\n=== Fetching news ===")
     fetch_news(cfg)
     print("\n=== Done ===")
-
-
-def cmd_pipeline_morning(args, cfg):
-    """Run full morning brief pipeline."""
-    from reports import get_morning_brief_data, print_pipeline_json
-    import json
-
-    print("=== Morning Brief Pipeline ===")
-    data = get_morning_brief_data(cfg)
-    print_pipeline_json(data)
-
-
-def cmd_report_morning(args, cfg):
-    """One-shot morning report: fetch-all + pipeline-morning."""
-    from fetcher import fetch_prices, fetch_broker_summary, fetch_fundamentals
-    from news import fetch_news
-    from reports import get_morning_brief_data, print_pipeline_json
-
-    print("=== Fetch Phase ===")
-    fetch_prices(cfg, days=args.days)
-    fetch_broker_summary(cfg)
-    fetch_fundamentals(cfg)
-    fetch_news(cfg)
-
-    print("\n=== Morning Brief Pipeline ===")
-    data = get_morning_brief_data(cfg)
-    print_pipeline_json(data)
-
-
-def cmd_pipeline_eod(args, cfg):
-    """Run full EOD report pipeline.
-
-    Steps:
-      1. Compute indicators (all watchlist)
-      2. Compute whale scores
-      3. Detect S/R levels
-      4. Compute macro regime
-      5. Compute sector rotation
-      6. Run screener (pool)
-      7. Compute signal scores (with macro + sector)
-      8. Generate charts (watchlist + top hits)
-      9. Assemble EOD report data
-      10. Print JSON for LLM layer
-    """
-    _run_eod_pipeline(args, cfg)
-
-
-def cmd_report_eod(args, cfg):
-    """One-shot EOD report: fetch-all + pipeline-eod in a single command."""
-    from fetcher import fetch_prices, fetch_broker_summary, fetch_fundamentals
-    from news import fetch_news
-
-    print("=== Fetch Phase ===")
-    fetch_prices(cfg, days=args.fetch_days)
-    fetch_broker_summary(cfg)
-    fetch_fundamentals(cfg)
-    fetch_news(cfg)
-
-    print("\n=== EOD Pipeline ===")
-    _run_eod_pipeline(args, cfg)
-
-
-def _run_eod_pipeline(args, cfg):
-    """Shared EOD pipeline logic used by both pipeline-eod and report-eod."""
-    from indicators import compute_all as compute_indicators
-    from whale import compute_all as compute_whales
-    from support_resistance import detect_all
-    from sector import compute_rotation
-    from reports import get_eod_report_data, print_pipeline_json
-    from charts import render_chart
-    from db import get_db
-
-    # Steps 1-3: compute derived data
-    print("\n--- Computing indicators ---")
-    compute_indicators(cfg)
-
-    print("\n--- Computing whale scores ---")
-    compute_whales(cfg)
-
-    print("\n--- Detecting S/R levels ---")
-    detect_all(cfg)
-
-    print("\n--- Computing sector rotation ---")
-    db = get_db(cfg)
-    compute_rotation(cfg, db)
-    db.close()
-
-    # Steps 4-8: assemble report (macro, screener, signals all inside)
-    print("\n--- Assembling report data ---")
-    data = get_eod_report_data(cfg)
-
-    # Generate charts for watchlist
-    print("\n--- Generating charts ---")
-    chart_paths = []
-    symbols = [s.replace(".JK", "") for s in cfg["watchlist"]]
-    for symbol in symbols:
-        try:
-            path = render_chart(cfg, symbol=symbol, days=args.days)
-            if path:
-                chart_paths.append(path)
-        except Exception as e:
-            print(f"  Chart error for {symbol}: {e}")
-
-    # Also chart top screener hits not in watchlist
-    hit_symbols = set()
-    for rule_name, hits in data.get("screener_hits", {}).items():
-        for h in hits:
-            hit_symbols.add(h["symbol"])
-    extra = [s for s in hit_symbols if s not in set(symbols)][:5]
-    for symbol in extra:
-        try:
-            path = render_chart(cfg, symbol=symbol, days=args.days)
-            if path:
-                chart_paths.append(path)
-        except Exception as e:
-            print(f"  Chart error for {symbol}: {e}")
-
-    data["chart_paths"] = chart_paths
-
-    print("\n--- Pipeline output ---")
-    print_pipeline_json(data)
 
 
 def cli():
@@ -317,22 +246,6 @@ def cli():
     p = sub.add_parser("fetch-all", help="run full daily fetch pipeline")
     p.add_argument("--days", type=int, default=180, help="days of price history")
 
-    # pipeline-morning
-    sub.add_parser("pipeline-morning", help="run morning brief pipeline (macro + watchlist + portfolio)")
-
-    # report-morning (one-shot: fetch + morning pipeline)
-    p = sub.add_parser("report-morning", help="one-shot morning report: fetch + pipeline")
-    p.add_argument("--days", type=int, default=180, help="days of price history to fetch")
-
-    # pipeline-eod
-    p = sub.add_parser("pipeline-eod", help="run full EOD report pipeline")
-    p.add_argument("--days", type=int, default=90, help="chart days to show")
-
-    # report-eod (one-shot: fetch + eod pipeline)
-    p = sub.add_parser("report-eod", help="one-shot EOD report: fetch + pipeline")
-    p.add_argument("--days", type=int, default=90, help="chart days to show")
-    p.add_argument("--fetch-days", type=int, default=180, help="days of price history to fetch")
-
     # indicators
     p = sub.add_parser("indicators", help="compute technical indicators")
     p.add_argument("--symbols", nargs="*", help="override watchlist")
@@ -340,11 +253,6 @@ def cli():
     # sr
     p = sub.add_parser("sr", help="detect support/resistance levels")
     p.add_argument("--symbols", nargs="*", help="override watchlist")
-
-    # screen
-    p = sub.add_parser("screen", help="run screener")
-    p.add_argument("--rule", help="run specific rule only")
-    p.add_argument("--pool", action="store_true", help="screen against scan pool instead of watchlist")
 
     # chart
     p = sub.add_parser("chart", help="render chart for a symbol")
@@ -404,6 +312,17 @@ def cli():
     p.add_argument("--brokers", action="store_true", help="backfill broker summary only")
     p.add_argument("--delay", type=float, default=0.5, help="pause between dates in seconds (default: 0.5)")
 
+    # --- Agent commands ---
+    # agent-chat
+    sub.add_parser("agent-chat", help="interactive agent chat in terminal")
+
+    # send-brief
+    p = sub.add_parser("send-brief", help="generate EOD brief (print to stdout, optionally send via Telegram)")
+    p.add_argument("--notify", action="store_true", help="also send via Telegram")
+
+    # bot
+    sub.add_parser("bot", help="start the Telegram bot")
+
     args = parser.parse_args()
     cfg = load_config(args.config)
 
@@ -417,13 +336,8 @@ def cli():
         "fetch-fundamentals": cmd_fetch_fundamentals,
         "fetch-news": cmd_fetch_news,
         "fetch-all": cmd_fetch_all,
-        "pipeline-morning": cmd_pipeline_morning,
-        "report-morning": cmd_report_morning,
-        "pipeline-eod": cmd_pipeline_eod,
-        "report-eod": cmd_report_eod,
         "indicators": cmd_indicators,
         "sr": cmd_sr,
-        "screen": cmd_screen,
         "chart": cmd_chart,
         "fetch-macro": cmd_fetch_macro,
         "macro-signals": cmd_macro_signals,
@@ -434,6 +348,9 @@ def cli():
         "trades": cmd_trades,
         "set-stop": cmd_set_stop,
         "backfill": cmd_backfill,
+        "agent-chat": cmd_agent_chat,
+        "send-brief": cmd_send_brief,
+        "bot": cmd_bot,
     }
     commands[args.command](args, cfg)
 

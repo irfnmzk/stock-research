@@ -125,6 +125,12 @@ CREATE TABLE IF NOT EXISTS indicators (
     bb_width     REAL,
     atr          REAL,
     volume_ratio REAL,
+    smart_broker_streak   INTEGER,
+    bb_squeeze_days       INTEGER,
+    foreign_flow_reversal INTEGER,
+    accdist_slope_5d      REAL,
+    accdist_slope_10d     REAL,
+    accdist_slope_20d     REAL,
     PRIMARY KEY (symbol, date)
 );
 
@@ -275,6 +281,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_se_dedup ON signal_events(symbol, date, si
 
 CREATE TABLE IF NOT EXISTS signal_base_rates (
     signal_type     TEXT NOT NULL,
+    direction       TEXT NOT NULL DEFAULT '',
     symbol          TEXT,
     broker_code     TEXT,
     sample_size     INTEGER,
@@ -288,28 +295,77 @@ CREATE TABLE IF NOT EXISTS signal_base_rates (
     median_return_10d REAL,
     median_return_20d REAL,
     last_computed   TEXT,
-    PRIMARY KEY (signal_type, symbol, broker_code)
+    PRIMARY KEY (signal_type, direction, symbol, broker_code)
 );
 
-CREATE TABLE IF NOT EXISTS broker_rankings (
-    symbol          TEXT,
-    sector          TEXT,
-    broker_code     TEXT NOT NULL,
-    level           TEXT NOT NULL,
-    hit_rate_5d     REAL,
-    hit_rate_10d    REAL,
-    avg_return_5d   REAL,
-    avg_return_10d  REAL,
-    sample_size     INTEGER,
-    rank            INTEGER,
-    is_smart        INTEGER DEFAULT 0,
-    last_computed   TEXT,
-    PRIMARY KEY (level, symbol, sector, broker_code)
+CREATE TABLE IF NOT EXISTS ticker_thesis (
+    symbol      TEXT PRIMARY KEY,
+    thesis      TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_br_smart ON broker_rankings(symbol)
-    WHERE is_smart = 1;
+CREATE TABLE IF NOT EXISTS session_summary (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    summary     TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS conversation_turns (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id  INTEGER NOT NULL,
+    role        TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_conv_session ON conversation_turns(session_id);
 """
+
+
+def _migrate(conn: sqlite3.Connection):
+    """Add columns that may be missing from older databases."""
+    new_cols = [
+        ("indicators", "smart_broker_streak", "INTEGER"),
+        ("indicators", "bb_squeeze_days", "INTEGER"),
+        ("indicators", "foreign_flow_reversal", "INTEGER"),
+        ("indicators", "accdist_slope_5d", "REAL"),
+        ("indicators", "accdist_slope_10d", "REAL"),
+        ("indicators", "accdist_slope_20d", "REAL"),
+    ]
+    existing = {}
+    for table, col, col_type in new_cols:
+        if table not in existing:
+            rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+            existing[table] = {r[1] for r in rows}
+        if col not in existing[table]:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+
+    # Add direction column to signal_base_rates if missing
+    sbr_cols = {r[1] for r in conn.execute("PRAGMA table_info(signal_base_rates)").fetchall()}
+    if "direction" not in sbr_cols:
+        conn.execute("DROP TABLE IF EXISTS signal_base_rates")
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS signal_base_rates (
+                signal_type     TEXT NOT NULL,
+                direction       TEXT NOT NULL DEFAULT '',
+                symbol          TEXT,
+                broker_code     TEXT,
+                sample_size     INTEGER,
+                hit_rate_5d     REAL,
+                hit_rate_10d    REAL,
+                hit_rate_20d    REAL,
+                avg_return_5d   REAL,
+                avg_return_10d  REAL,
+                avg_return_20d  REAL,
+                median_return_5d  REAL,
+                median_return_10d REAL,
+                median_return_20d REAL,
+                last_computed   TEXT,
+                PRIMARY KEY (signal_type, direction, symbol, broker_code)
+            );
+        """)
+
+    conn.commit()
 
 
 def get_db(cfg) -> sqlite3.Connection:
@@ -319,4 +375,5 @@ def get_db(cfg) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path), timeout=30)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn

@@ -1,5 +1,6 @@
 data/
 config.yaml
+.env
 *.egg-info/
 __pycache__/
 .venv/
