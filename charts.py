@@ -9,7 +9,7 @@ from db import get_db
 
 
 def render_chart(cfg, symbol, days=90):
-    """Render a 3-panel candlestick chart for a symbol."""
+    """Render a candlestick chart: price + EMAs + S/R, volume, RSI, MACD."""
     db = get_db(cfg)
 
     rows = db.execute(
@@ -28,14 +28,14 @@ def render_chart(cfg, symbol, days=90):
 
     # Load indicators
     ind_rows = db.execute(
-        "SELECT date, ema20, ema50, ema200, rsi FROM indicators "
+        "SELECT date, ema20, ema50, ema200, rsi, macd, macd_signal, macd_hist FROM indicators "
         "WHERE symbol = ? ORDER BY date",
         (symbol,),
     ).fetchall()
 
     add_plots = []
     if ind_rows:
-        idf = pd.DataFrame(ind_rows, columns=["Date", "ema20", "ema50", "ema200", "rsi"])
+        idf = pd.DataFrame(ind_rows, columns=["Date", "ema20", "ema50", "ema200", "rsi", "macd", "macd_signal", "macd_hist"])
         idf["Date"] = pd.to_datetime(idf["Date"])
         idf.set_index("Date", inplace=True)
         idf = idf.reindex(df.index)
@@ -48,37 +48,11 @@ def render_chart(cfg, symbol, days=90):
         if idf["rsi"].notna().any():
             add_plots.append(mpf.make_addplot(idf["rsi"], panel=2, color="#9C27B0", ylabel="RSI"))
 
-    # Foreign flow as bar chart on panel 2
-    ff_rows = db.execute(
-        "SELECT date, (COALESCE(foreign_buy, 0) - COALESCE(foreign_sell, 0)) as foreign_net "
-        "FROM prices WHERE symbol = ? ORDER BY date",
-        (symbol,),
-    ).fetchall()
-
-    if ff_rows:
-        fdf = pd.DataFrame(ff_rows, columns=["Date", "foreign_net"])
-        fdf["Date"] = pd.to_datetime(fdf["Date"])
-        fdf.set_index("Date", inplace=True)
-        fdf = fdf.reindex(df.index).fillna(0)
-        colors_ff = ["#4CAF50" if v >= 0 else "#F44336" for v in fdf["foreign_net"]]
-        add_plots.append(mpf.make_addplot(
-            fdf["foreign_net"], panel=2, type="bar", color=colors_ff, ylabel="Foreign Net", width=0.7,
-        ))
-
-    # Whale score as line on panel 3 (if data exists)
-    ws_rows = db.execute(
-        "SELECT date, composite_score FROM whale_scores WHERE symbol = ? ORDER BY date",
-        (symbol,),
-    ).fetchall()
-    if ws_rows:
-        wdf = pd.DataFrame(ws_rows, columns=["Date", "whale"])
-        wdf["Date"] = pd.to_datetime(wdf["Date"])
-        wdf.set_index("Date", inplace=True)
-        wdf = wdf.reindex(df.index)
-        if wdf["whale"].notna().any():
-            add_plots.append(mpf.make_addplot(
-                wdf["whale"], panel=3, color="#FF9800", ylabel="Whale", width=1.2,
-            ))
+        if idf["macd"].notna().any():
+            add_plots.append(mpf.make_addplot(idf["macd"], panel=3, color="#2196F3", ylabel="MACD", width=0.8))
+            add_plots.append(mpf.make_addplot(idf["macd_signal"], panel=3, color="#FF9800", width=0.8))
+            macd_colors = ["#4CAF50" if v >= 0 else "#F44336" for v in idf["macd_hist"].fillna(0)]
+            add_plots.append(mpf.make_addplot(idf["macd_hist"], panel=3, type="bar", color=macd_colors, width=0.7))
 
     # S/R lines — only nearest 3 supports and 3 resistances within visible range
     price_min = df["Low"].min()
@@ -114,15 +88,30 @@ def render_chart(cfg, symbol, days=90):
         type="candle",
         style=cfg["charts"]["style"],
         volume=True,
-        title=f"{symbol} - {days}d",
         figsize=(fig_w, fig_h),
-        savefig=str(out_path),
         tight_layout=True,
+        returnfig=True,
+        panel_ratios=(4, 1.5, 1.5, 1.5),
     )
     if add_plots:
         kwargs["addplot"] = add_plots
 
-    mpf.plot(df, **kwargs)
+    fig, axes = mpf.plot(df, **kwargs)
+
+    # Style panel labels: clear, outside the plot area
+    panel_labels = {0: symbol, 1: "Vol", 2: "RSI", 3: "MACD"}
+    for ax in axes:
+        ax.yaxis.label.set_fontsize(9)
+        ax.yaxis.label.set_fontweight("bold")
+    for panel_idx, label in panel_labels.items():
+        ax = axes[panel_idx * 2] if panel_idx * 2 < len(axes) else None
+        if ax:
+            ax.set_ylabel(label, fontsize=10, fontweight="bold", rotation=0, labelpad=35, va="center")
+
+    fig.savefig(str(out_path), dpi=150, bbox_inches="tight")
+    import matplotlib.pyplot as plt
+    plt.close(fig)
+
     print(f"Chart saved to {out_path}")
     db.close()
     return str(out_path)

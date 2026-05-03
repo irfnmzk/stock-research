@@ -163,8 +163,9 @@ def cmd_agent_chat(args, cfg):
 def cmd_send_brief(args, cfg):
     """Generate and print EOD brief (or send via Telegram with --notify)."""
     from agent import generate_eod_brief
+    import json
     brief = generate_eod_brief(cfg)
-    print(brief)
+    print(json.dumps(brief, indent=2, ensure_ascii=False))
 
     if args.notify:
         import asyncio

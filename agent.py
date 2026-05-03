@@ -37,7 +37,11 @@ def _get_client():
 
 
 def generate_eod_brief(cfg):
-    """Generate EOD brief — single Claude call, all data in context."""
+    """Generate EOD brief — single Claude call, returns structured dict.
+
+    Returns {"stocks": {"SYMBOL": "caption", ...}, "overview": "..."}.
+    Falls back to {"stocks": {}, "overview": raw_text} if JSON parsing fails.
+    """
     client = _get_client()
     agent_cfg = cfg.get("agent", {})
     model = agent_cfg.get("model", "claude-sonnet-4-20250514")
@@ -53,7 +57,25 @@ def generate_eod_brief(cfg):
         messages=[{"role": "user", "content": "Generate today's end-of-day brief."}],
     )
 
-    return _extract_text(response.content)
+    raw = _extract_text(response.content)
+
+    # Strip markdown code fences if present
+    stripped = raw.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.split("\n", 1)[1] if "\n" in stripped else stripped[3:]
+        if stripped.endswith("```"):
+            stripped = stripped[:-3]
+        stripped = stripped.strip()
+
+    try:
+        brief = json.loads(stripped)
+        if "stocks" in brief and "overview" in brief:
+            return brief
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    log.warning("EOD brief JSON parse failed, using raw text as overview")
+    return {"stocks": {}, "overview": raw}
 
 
 def run_conversation(cfg, user_message, session_id=None):
@@ -180,7 +202,8 @@ if __name__ == "__main__":
     cfg = yaml.safe_load(open(SCRIPT_DIR / args.config))
 
     if args.test_brief:
-        print(generate_eod_brief(cfg))
+        brief = generate_eod_brief(cfg)
+        print(json.dumps(brief, indent=2, ensure_ascii=False))
     elif args.test_chat:
         text, charts, sid = run_conversation(cfg, args.test_chat)
         print(text)

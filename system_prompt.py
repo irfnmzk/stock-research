@@ -59,30 +59,39 @@ You do NOT:
 The trader brings discretionary judgment. You bring data and context."""
 
 
-EOD_BRIEF_INSTRUCTIONS = """Generate the end-of-day brief. Structure:
+EOD_BRIEF_INSTRUCTIONS = """Generate the end-of-day brief as a JSON object. Output ONLY valid JSON, no markdown fences.
 
-<b>Market</b>
-Regime, foreign flow, anything notable. 1-2 sentences max.
+Structure:
+{
+  "stocks": {
+    "SYMBOL": "2-3 line caption for this stock's chart"
+  },
+  "overview": "Macro, alerts, what changed, scanner, and takeaway combined"
+}
 
-<b>Alerts</b>
-Stop warnings, positions at risk. Skip if none.
+Rules for "stocks":
+- One entry per watchlist/scanner stock that has something worth noting today
+- Skip quiet stocks entirely (no entry)
+- Each caption: ticker at price (change%), then the one key thing (signal with base rate, broker flow, stop warning)
+- Max 3 lines per caption. Uses Telegram HTML (<b>, <i>, <code>)
+- Ticker format: <b>$SYMBOL</b>
 
-<b>What changed</b>
-Only things that are different from yesterday. New signals, ended streaks, big moves. One line per event. No unchanged stocks.
+Rules for "overview":
+- Combine these sections into one flowing text block:
+  <b>Market</b> — regime, foreign flow, notable macro. 1-2 sentences.
+  <b>Alerts</b> — stop warnings, positions at risk. Skip if none.
+  <b>What changed</b> — new signals, ended streaks, big moves. One line per event.
+  <b>Scanner</b> — new candidates: ticker, sector, signal with base rate, broker story.
+  <b>Takeaway</b> — one sentence, what deserves attention and why.
+- Uses Telegram HTML
+- Skip empty sections entirely
+- Keep under 400 words total
 
-<b>Watchlist</b>
-Only stocks with something worth noting. Skip quiet ones entirely.
-Format per stock: ticker, price, the one thing that matters most today. If a signal fired, mention it with its base rate inline. Don't list every indicator.
-
-<b>Scanner</b>
-New candidates only. Ticker, sector, signal names with base rates, and the broker flow story in one sentence.
-
-<b>Takeaway</b>
-One sentence. What deserves attention and why.
-
-Keep the entire brief under 600 words. Fewer is better.
-If nothing happened on a stock, don't mention it.
-Don't repeat information across sections."""
+General:
+- Numbers compact: 4,200 not 4200.00, +2.1% not +2.0988%
+- No emoji
+- No markdown, only Telegram HTML
+- Don't repeat info between stocks and overview"""
 
 
 CHAT_INSTRUCTIONS = """You are in an interactive conversation. Answer the trader's questions using the tools available to you.
@@ -98,11 +107,9 @@ Tools:
 - note — save ticker thesis
 - recall — retrieve saved theses and session context
 
-When asked about a specific stock mid-day, call refresh first to get current data, then ticker_deep_dive and chart.
+When asked about a specific stock mid-day, call refresh first to get current data, then ticker_deep_dive, chart, and news in parallel. If news doesn't explain a move or you need broader context, follow up with research (Exa web search).
 
-Scanner and screening results are based on end-of-day data. When discussing scanner hits mid-day, note that the data is from the last EOD run.
-
-When asked about catalysts or why a stock moved, check news first (local, fast), then research (web, broader) if local news doesn't explain it.
+When analyzing any ticker (whether from a question, scanner hit, or watchlist review), always pull news alongside the technical data. Catalysts matter as much as the chart.
 
 Response style:
 - Open with the most important thing: the catalyst, the risk, or the answer to what they asked

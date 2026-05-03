@@ -5,11 +5,13 @@ Uses python-telegram-bot v21+ async API.
 """
 
 import asyncio
+import datetime
 import logging
 import os
 import re
 import time
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import yaml
 from dotenv import load_dotenv
@@ -25,9 +27,9 @@ from telegram.ext import (
     filters,
 )
 
-from agent import generate_eod_brief, run_conversation, close_session
+from agent import close_session, generate_eod_brief, run_conversation
 from db import get_db
-from memory import set_thesis, get_thesis, get_all_theses
+from memory import get_all_theses, get_thesis, save_turn, set_thesis, start_session
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 log = logging.getLogger("bot")
@@ -93,6 +95,11 @@ def _sanitize_html(text):
     return "".join(escaped)
 
 
+def _strip_html(text):
+    """Remove all HTML tags for plain-text fallback."""
+    return re.sub(r"<[^>]+>", "", text)
+
+
 async def _send_reply(message, text, charts=None):
     """Send text + optional charts. Single chart: text as caption. Multiple: text then album."""
     CAPTION_MAX = 1024
@@ -106,26 +113,26 @@ async def _send_reply(message, text, charts=None):
             try:
                 await message.reply_photo(photo=photo, caption=text, parse_mode=ParseMode.HTML)
             except Exception:
-                await message.reply_photo(photo=photo, caption=text)
+                await message.reply_photo(photo=photo, caption=_strip_html(text))
         else:
             caption = text[:CAPTION_MAX].rsplit("\n", 1)[0]
             remainder = text[len(caption):].lstrip("\n")
             try:
                 await message.reply_photo(photo=photo, caption=caption, parse_mode=ParseMode.HTML)
             except Exception:
-                await message.reply_photo(photo=photo, caption=caption)
+                await message.reply_photo(photo=photo, caption=_strip_html(caption))
             for chunk in _split_message(remainder):
                 try:
                     await message.reply_text(chunk, parse_mode=ParseMode.HTML)
                 except Exception:
-                    await message.reply_text(chunk)
+                    await message.reply_text(_strip_html(chunk))
         return
 
     for chunk in _split_message(text):
         try:
             await message.reply_text(chunk, parse_mode=ParseMode.HTML)
         except Exception:
-            await message.reply_text(chunk)
+            await message.reply_text(_strip_html(chunk))
 
     if not valid_charts:
         return
@@ -165,15 +172,37 @@ async def cmd_brief(update: Update, context: ContextTypes.DEFAULT_TYPE):
         stop.set()
         await typing_task
 
+        stocks = brief.get("stocks", {})
+        overview = brief.get("overview", "")
         chart_dir = SCRIPT_DIR / cfg.get("charts", {}).get("output_dir", "data/charts")
         watchlist = [s.replace(".JK", "") for s in cfg.get("watchlist", [])]
-        chart_paths = [
-            str(chart_dir / f"{sym}.png")
-            for sym in watchlist
-            if (chart_dir / f"{sym}.png").exists()
-        ]
 
-        await _send_reply(update.message, brief, charts=chart_paths)
+        all_symbols = list(watchlist)
+        for sym in stocks:
+            if sym not in all_symbols and (chart_dir / f"{sym}.png").exists():
+                all_symbols.append(sym)
+
+        for sym in all_symbols:
+            chart_path = chart_dir / f"{sym}.png"
+            if not chart_path.exists():
+                continue
+            caption = _sanitize_html(stocks.get(sym, sym))
+            try:
+                await update.message.reply_photo(
+                    photo=open(chart_path, "rb"), caption=caption, parse_mode=ParseMode.HTML,
+                )
+            except Exception:
+                await update.message.reply_photo(
+                    photo=open(chart_path, "rb"), caption=_strip_html(stocks.get(sym, sym)),
+                )
+
+        if overview:
+            overview_html = _sanitize_html(overview)
+            for chunk in _split_message(overview_html):
+                try:
+                    await update.message.reply_text(chunk, parse_mode=ParseMode.HTML)
+                except Exception:
+                    await update.message.reply_text(_strip_html(chunk))
 
     except Exception as e:
         stop.set()
@@ -298,6 +327,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error: {e}")
 
 
+async def _send_html(bot, chat_id, text):
+    """Send text with HTML parse mode, falling back to stripped plain text."""
+    try:
+        await bot.send_message(chat_id=chat_id, text=text, parse_mode=ParseMode.HTML)
+    except Exception:
+        await bot.send_message(chat_id=chat_id, text=_strip_html(text))
+
+
 async def trigger_eod_brief(cfg, app: Application):
     auth_id = cfg.get("telegram", {}).get("authorized_user_id", 0)
     if not auth_id:
@@ -305,30 +342,83 @@ async def trigger_eod_brief(cfg, app: Application):
 
     try:
         brief = generate_eod_brief(cfg)
-        brief = _sanitize_html(brief)
-
-        for chunk in _split_message(brief):
-            try:
-                await app.bot.send_message(chat_id=auth_id, text=chunk, parse_mode=ParseMode.HTML)
-            except Exception:
-                await app.bot.send_message(chat_id=auth_id, text=chunk)
+        stocks = brief.get("stocks", {})
+        overview = brief.get("overview", "")
 
         chart_dir = SCRIPT_DIR / cfg.get("charts", {}).get("output_dir", "data/charts")
         watchlist = [s.replace(".JK", "") for s in cfg.get("watchlist", [])]
-        photos = []
-        for sym in watchlist:
-            chart_path = chart_dir / f"{sym}.png"
-            if chart_path.exists():
-                photos.append(InputMediaPhoto(media=open(chart_path, "rb"), caption=sym))
 
-        if len(photos) == 1:
-            await app.bot.send_photo(chat_id=auth_id, photo=photos[0].media, caption=photos[0].caption)
-        elif photos:
-            for batch in [photos[i:i+10] for i in range(0, len(photos), 10)]:
-                await app.bot.send_media_group(chat_id=auth_id, media=batch)
+        # Collect all stock photos: watchlist first, then scanner
+        all_symbols = list(watchlist)
+        for sym in stocks:
+            if sym not in all_symbols and (chart_dir / f"{sym}.png").exists():
+                all_symbols.append(sym)
+
+        for sym in all_symbols:
+            chart_path = chart_dir / f"{sym}.png"
+            if not chart_path.exists():
+                continue
+            caption = _sanitize_html(stocks.get(sym, sym))
+            try:
+                await app.bot.send_photo(
+                    chat_id=auth_id,
+                    photo=open(chart_path, "rb"),
+                    caption=caption,
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception:
+                await app.bot.send_photo(
+                    chat_id=auth_id,
+                    photo=open(chart_path, "rb"),
+                    caption=_strip_html(stocks.get(sym, sym)),
+                )
+
+        # Send overview as text
+        if overview:
+            overview_html = _sanitize_html(overview)
+            for chunk in _split_message(overview_html):
+                await _send_html(app.bot, auth_id, chunk)
+
+        _save_eod_to_history(cfg, brief)
 
     except Exception as e:
         log.error("EOD brief delivery failed: %s", e)
+
+
+def _save_eod_to_history(cfg, brief):
+    """Save the EOD brief to conversation history so the agent can reference it."""
+    # Reconstruct full text for history
+    parts = []
+    for _, caption in brief.get("stocks", {}).items():
+        parts.append(caption)
+    if brief.get("overview"):
+        parts.append(brief["overview"])
+    full_text = "\n\n".join(parts)
+
+    db = get_db(cfg)
+    session_id = start_session(db)
+    save_turn(db, session_id, "user", "[Scheduled] Generate today's end-of-day brief.")
+    save_turn(db, session_id, "assistant", full_text)
+    db.close()
+    close_session(cfg, session_id)
+
+
+async def _scheduled_eod_job(context: ContextTypes.DEFAULT_TYPE):
+    """Daily scheduled job: run pipeline, generate brief, send via Telegram."""
+    cfg = context.job.data
+    log.info("Scheduled EOD job started")
+
+    if cfg.get("schedule", {}).get("eod_brief", {}).get("run_pipeline", True):
+        try:
+            from run_eod import run as run_pipeline
+            log.info("Running EOD pipeline...")
+            await asyncio.get_event_loop().run_in_executor(
+                None, lambda: run_pipeline(notify=False)
+            )
+        except Exception as e:
+            log.error("Scheduled pipeline failed: %s", e)
+
+    await trigger_eod_brief(cfg, context.application)
 
 
 def _split_message(text, max_len=4000):
@@ -375,6 +465,21 @@ def run_bot():
     app.add_handler(CommandHandler("note", cmd_note))
     app.add_handler(CommandHandler("recall", cmd_recall))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    schedule_cfg = cfg.get("schedule", {}).get("eod_brief", {})
+    if schedule_cfg.get("enabled"):
+        if app.job_queue:
+            h, m = map(int, schedule_cfg.get("time", "17:00").split(":"))
+            tz = ZoneInfo(schedule_cfg.get("timezone", "Asia/Jakarta"))
+            app.job_queue.run_daily(
+                _scheduled_eod_job,
+                time=datetime.time(h, m, tzinfo=tz),
+                data=cfg,
+                name="eod_brief",
+            )
+            log.info("Scheduled EOD brief at %s %s", schedule_cfg.get("time", "17:00"), schedule_cfg.get("timezone", "Asia/Jakarta"))
+        else:
+            log.warning("EOD schedule enabled but JobQueue unavailable — install python-telegram-bot[job-queue]")
 
     log.info("Bot starting...")
     app.run_polling()

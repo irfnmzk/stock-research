@@ -12,7 +12,7 @@ dependencies = [
     "pyyaml>=6.0",
     "duckdb>=1.5.2",
     "anthropic>=0.52",
-    "python-telegram-bot>=21.10",
+    "python-telegram-bot[job-queue]>=21.10",
     "python-dotenv>=1.0",
 ]
 

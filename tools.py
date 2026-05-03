@@ -416,7 +416,7 @@ def _handle_refresh(cfg, inp):
     from whale import compute_all as compute_whales
     from temporal import compute_all as compute_temporal
     from signal_engine import evaluate_all, log_signals
-    from macro import get_regime
+    from macro import get_macro_regime
     from db import get_db as _get_db
 
     symbol = inp["symbol"].upper()
@@ -444,9 +444,8 @@ def _handle_refresh(cfg, inp):
         return f"Refresh failed during compute ({', '.join(steps)} ok): {e}"
 
     try:
-        db = _get_db(cfg)
-        regime = get_regime(db)
-        db.close()
+        regime_data = get_macro_regime(cfg)
+        regime = regime_data.get("regime")
         signals = evaluate_all(cfg, symbols=syms)
         db = _get_db(cfg)
         log_signals(db, signals, regime=regime)
