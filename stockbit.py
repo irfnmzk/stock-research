@@ -93,7 +93,7 @@ class TokenManager:
         # Parse expiry from expired_at or fallback to 24h
         expired_at = access_data.get("expired_at")
         if expired_at:
-            from datetime import datetime, timezone
+            from datetime import datetime
             exp_dt = datetime.fromisoformat(expired_at.replace("Z", "+00:00"))
             self.expires_at = exp_dt.timestamp()
         else:
@@ -132,13 +132,6 @@ class StockbitClient:
             "from": end,
         })
 
-    def intraday_prices(self, symbol: str, ts_from: int, ts_to: int) -> dict:
-        """Fetch intraday per-minute OHLCV. ts_from/ts_to are unix timestamps."""
-        return self._get(f"/chartbit/{symbol}/price/intraday", params={
-            "to": ts_from,
-            "from": ts_to,
-        })
-
     def market_detectors(self, symbol: str) -> dict:
         """Broker summary + bandar detector for a symbol (latest day)."""
         return self._get(f"/marketdetectors/{symbol}")
@@ -146,18 +139,6 @@ class StockbitClient:
     def market_detectors_date(self, symbol: str, date: str) -> dict:
         """Broker summary + bandar detector for a symbol on a specific date."""
         return self._get(f"/marketdetectors/{symbol}", params={"from": date, "to": date})
-
-    def running_trade(self, symbol: str) -> dict:
-        """Running trade / order flow chart data."""
-        return self._get(f"/order-trade/running-trade/chart/{symbol}")
-
-    def broker_activity_chart(self, broker: str, **params) -> dict:
-        """Broker reverse lookup (chart view)."""
-        return self._get("/order-trade/broker/activity-chart", params={"broker": broker, **params})
-
-    def broker_activity(self, broker: str, **params) -> dict:
-        """Broker reverse lookup (table view)."""
-        return self._get("/order-trade/broker/activity", params={"broker": broker, **params})
 
     def insider_holders(self, symbol: str) -> dict:
         """Insider / major holder filings."""

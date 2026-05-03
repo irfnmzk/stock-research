@@ -220,7 +220,7 @@ def step_assemble(cfg, signals_by_symbol=None) -> dict:
     from changes import detect_changes
     from broker_narrative import generate_all as generate_narratives
     from sector import get_sector_leaders
-    from portfolio import get_portfolio, get_tranche_suggestions, get_stop_warnings
+    from portfolio import get_portfolio, get_stop_warnings
     from base_rates import get_signal_base_rate
     from db import get_db
 

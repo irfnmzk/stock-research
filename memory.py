@@ -5,7 +5,6 @@ All data in the same SQLite DB as the rest of the project.
 """
 
 from datetime import datetime
-from db import get_db
 
 
 def set_thesis(db, symbol, thesis):
@@ -34,12 +33,6 @@ def get_all_theses(db):
         "SELECT symbol, thesis, updated_at FROM ticker_thesis ORDER BY updated_at DESC"
     ).fetchall()
     return [{"symbol": r["symbol"], "thesis": r["thesis"], "updated_at": r["updated_at"]} for r in rows]
-
-
-def delete_thesis(db, symbol):
-    """Remove a ticker thesis."""
-    db.execute("DELETE FROM ticker_thesis WHERE symbol = ?", (symbol,))
-    db.commit()
 
 
 def save_turn(db, session_id, role, content):

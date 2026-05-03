@@ -23,20 +23,6 @@ SECTOR_MAP = {
 IDX_TO_SECTOR = {v: k for k, v in SECTOR_MAP.items()}
 
 
-def get_stock_sector(db, symbol: str) -> dict:
-    """Get sector info for a symbol. Returns {sector_name, idx_name} or empty dict."""
-    row = db.execute(
-        "SELECT sector_name FROM companies WHERE symbol = ?", (symbol,)
-    ).fetchone()
-    if not row or not row["sector_name"]:
-        return {}
-    sector_name = row["sector_name"]
-    return {
-        "sector_name": sector_name,
-        "idx_name": SECTOR_MAP.get(sector_name, ""),
-    }
-
-
 def get_sector_leaders(cfg, db, top_n: int = 3) -> list:
     """Get top N sectors by 5d rotation rank with their constituent stocks.
 

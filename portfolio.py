@@ -5,31 +5,6 @@ from datetime import date as dt_date
 from db import get_db
 
 
-def init_portfolio_tables(conn: sqlite3.Connection):
-    """Ensure portfolio tables exist (handled by db.py SCHEMA, but safe to call)."""
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS trades (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            symbol          TEXT NOT NULL,
-            date            TEXT NOT NULL,
-            action          TEXT NOT NULL,
-            lots            INTEGER NOT NULL,
-            price           REAL NOT NULL,
-            fees            REAL DEFAULT 0,
-            notes           TEXT
-        );
-        CREATE TABLE IF NOT EXISTS positions (
-            symbol          TEXT PRIMARY KEY,
-            avg_cost        REAL NOT NULL,
-            total_lots      INTEGER NOT NULL,
-            stop_loss       REAL,
-            tranches_planned INTEGER DEFAULT 4,
-            tranches_done   INTEGER DEFAULT 0,
-            notes           TEXT
-        );
-    """)
-
-
 def add_trade(conn: sqlite3.Connection, symbol: str, action: str, lots: int,
               price: float, fees: float = 0, date: str = None, notes: str = None,
               stop_loss: float = None, tranches_planned: int = None):
@@ -118,18 +93,6 @@ def set_stop_loss(conn: sqlite3.Connection, symbol: str, stop_loss: float):
     else:
         conn.commit()
         print(f"Stop loss for {symbol} set to {stop_loss:,.0f}")
-
-
-def set_tranches(conn: sqlite3.Connection, symbol: str, planned: int):
-    """Update tranches planned for a position."""
-    symbol = symbol.upper()
-    result = conn.execute("UPDATE positions SET tranches_planned = ? WHERE symbol = ?",
-                          (planned, symbol))
-    if result.rowcount == 0:
-        print(f"No open position for {symbol}")
-    else:
-        conn.commit()
-        print(f"Tranches planned for {symbol} set to {planned}")
 
 
 def get_portfolio(conn: sqlite3.Connection) -> list[dict]:

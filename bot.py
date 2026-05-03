@@ -25,9 +25,9 @@ from telegram.ext import (
     filters,
 )
 
-from agent import generate_eod_brief, generate_eod_brief_with_charts, run_conversation, close_session
+from agent import generate_eod_brief, run_conversation, close_session
 from db import get_db
-from memory import set_thesis, get_thesis, get_all_theses, get_recent_summaries
+from memory import set_thesis, get_thesis, get_all_theses
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 log = logging.getLogger("bot")

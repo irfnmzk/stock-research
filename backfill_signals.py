@@ -27,7 +27,7 @@ from temporal import (
     _foreign_flow_reversal,
     _accdist_slopes,
 )
-from signal_engine import evaluate_signals, Signal
+from signal_engine import evaluate_signals
 import json
 
 

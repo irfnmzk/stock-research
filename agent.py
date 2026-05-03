@@ -5,7 +5,6 @@ Two entry points:
 - run_conversation(cfg, user_message, session_id) — multi-turn with tools
 """
 
-import base64
 import json
 import logging
 import os
@@ -52,46 +51,6 @@ def generate_eod_brief(cfg):
         max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": "Generate today's end-of-day brief."}],
-    )
-
-    return _extract_text(response.content)
-
-
-def generate_eod_brief_with_charts(cfg):
-    """Generate EOD brief with chart vision — sends chart images for watchlist stocks."""
-    client = _get_client()
-    agent_cfg = cfg.get("agent", {})
-    model = agent_cfg.get("model", "claude-sonnet-4-20250514")
-    max_tokens = agent_cfg.get("max_tokens", 4096)
-
-    context = build_context(cfg)
-    system = build_eod_prompt(context)
-
-    # Build message with chart images
-    content_blocks = [{"type": "text", "text": "Generate today's end-of-day brief. I'm including charts for the watchlist stocks."}]
-
-    watchlist = [s.replace(".JK", "") for s in cfg.get("watchlist", [])]
-    chart_dir = SCRIPT_DIR / cfg.get("charts", {}).get("output_dir", "data/charts")
-
-    for symbol in watchlist:
-        chart_path = chart_dir / f"{symbol}.png"
-        if chart_path.exists():
-            with open(chart_path, "rb") as f:
-                img_data = base64.standard_b64encode(f.read()).decode("utf-8")
-            content_blocks.append({
-                "type": "text",
-                "text": f"\n{symbol} chart:",
-            })
-            content_blocks.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": "image/png", "data": img_data},
-            })
-
-    response = client.messages.create(
-        model=model,
-        max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": content_blocks}],
     )
 
     return _extract_text(response.content)

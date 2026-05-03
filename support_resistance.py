@@ -80,46 +80,6 @@ def detect(cfg, db, symbol):
     print(f"  Found {len(rows)} S/R levels for {symbol}")
 
 
-def check_breakouts(cfg, db, symbol):
-    """Check if latest price breaks any S/R level."""
-    df = _load_prices(db, symbol)
-    if len(df) < 3:
-        return []
-
-    bc = cfg["breakout"]
-    latest = df.iloc[-1]
-    prev = df.iloc[-2]
-
-    levels = db.execute(
-        "SELECT level, level_type FROM support_resistance WHERE symbol = ?",
-        (symbol,),
-    ).fetchall()
-
-    vr_row = db.execute(
-        "SELECT volume_ratio FROM indicators WHERE symbol = ? ORDER BY date DESC LIMIT 1",
-        (symbol,),
-    ).fetchone()
-    volume_ratio = vr_row["volume_ratio"] if vr_row and vr_row["volume_ratio"] else 0
-
-    breakouts = []
-    for row in levels:
-        level, ltype = row["level"], row["level_type"]
-        if ltype == "resistance" and latest["close"] > level and prev["close"] <= level:
-            if volume_ratio >= bc["volume_ratio_min"]:
-                breakouts.append({
-                    "symbol": symbol, "type": "breakout_above",
-                    "level": level, "close": latest["close"], "volume_ratio": volume_ratio,
-                })
-        elif ltype == "support" and latest["close"] < level and prev["close"] >= level:
-            if volume_ratio >= bc["volume_ratio_min"]:
-                breakouts.append({
-                    "symbol": symbol, "type": "breakdown_below",
-                    "level": level, "close": latest["close"], "volume_ratio": volume_ratio,
-                })
-
-    return breakouts
-
-
 def detect_all(cfg, symbols=None):
     """Detect S/R for all watchlist symbols."""
     db = get_db(cfg)

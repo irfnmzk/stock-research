@@ -1,7 +1,6 @@
 """IDX Research Assistant - CLI entry point."""
 
 import argparse
-import sys
 from pathlib import Path
 
 import yaml

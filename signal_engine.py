@@ -4,7 +4,7 @@ A signal fires on the day a transition happens, not while a condition persists.
 Each evaluator compares today vs yesterday to detect the change.
 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 import json
 from db import get_db
 
@@ -86,19 +86,6 @@ def _load_sr_levels(db, symbol):
         (symbol,),
     ).fetchall()
     return [dict(r) for r in rows]
-
-
-def _daily_turnover(db, symbol, date):
-    """Get average daily turnover (value) over last 20 days."""
-    row = db.execute(
-        """SELECT AVG(value) as avg_val FROM (
-               SELECT value FROM prices
-               WHERE symbol = ? AND date <= ? AND value IS NOT NULL
-               ORDER BY date DESC LIMIT 20
-           )""",
-        (symbol, date),
-    ).fetchone()
-    return (row["avg_val"] or 0) if row else 0
 
 
 # ---------------------------------------------------------------------------

@@ -176,22 +176,3 @@ def summarize_research(results: list[dict]) -> str:
             text_snippet = r.get("text", "")[:200]
             lines.append(f"- {title}: {text_snippet}")
     return "\n".join(lines)
-
-
-def research_portfolio(cfg, days_back: int = 3) -> dict:
-    """Research all open portfolio positions. Returns {symbol: [results]}."""
-    from db import get_db
-    from portfolio import get_portfolio
-
-    conn = get_db(cfg)
-    positions = get_portfolio(conn)
-
-    research = {}
-    for pos in positions:
-        symbol = pos["symbol"]
-        results = research_ticker(symbol, days_back=days_back, db=conn)
-        if results:
-            research[symbol] = results
-
-    conn.close()
-    return research

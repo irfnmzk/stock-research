@@ -1,6 +1,5 @@
 """Agent tools — tool definitions and handlers for the Anthropic SDK."""
 
-import json
 from db import get_db
 from memory import set_thesis, get_thesis, get_all_theses, get_recent_summaries
 from signal_engine import display_name

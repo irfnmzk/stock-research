@@ -4,7 +4,6 @@ Computes per-signal-type hit rates and avg returns (per-ticker and market-wide).
 Query functions return base rates for use in scanner, agent, and tools.
 """
 
-import json
 from db import get_db
 
 MIN_SAMPLES_TICKER = 15
