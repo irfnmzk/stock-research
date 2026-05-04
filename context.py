@@ -86,6 +86,16 @@ def _section_portfolio(data):
     return "\n".join(lines)
 
 
+def _momentum_tag(entry):
+    """Return [MOMENTUM] tag if stock is above EMA200 and RSI > 60."""
+    price = entry.get("price") or entry.get("close")
+    ema200 = entry.get("ema200")
+    rsi = entry.get("rsi")
+    if price and ema200 and rsi and price > ema200 and rsi > 60:
+        return " [MOMENTUM]"
+    return ""
+
+
 def _section_watchlist(data):
     watchlist = data.get("watchlist", {})
     if not watchlist:
@@ -103,11 +113,13 @@ def _section_watchlist(data):
         if r5 is not None:
             ret_str = f"5d:{r5:+.1f}% 10d:{r10:+.1f}% 20d:{r20:+.1f}%"
 
+        tag = _momentum_tag(entry)
         line = f"  {sym}: {price:,.0f} ({chg:+.1f}%)"
         if rsi:
             line += f" RSI {rsi:.0f}"
         if ret_str:
             line += f" [{ret_str}]"
+        line += tag
         lines.append(line)
 
         for s in entry.get("signals", []):
@@ -125,32 +137,55 @@ def _section_scanner(data):
     scanner = data.get("scanner", [])
     if not scanner:
         return "Scanner: no candidates today."
-    lines = ["Scanner picks:"]
-    for c in scanner:
-        sym = c["symbol"]
-        cnt = c["signal_count"]
-        sector = c.get("sector", "")
-        r5 = c.get("return_5d")
-        r10 = c.get("return_10d")
-        r20 = c.get("return_20d")
-        ret_str = ""
-        if r5 is not None:
-            ret_str = f" [5d:{r5:+.1f}% 10d:{r10:+.1f}% 20d:{r20:+.1f}%]"
 
-        lines.append(f"  {sym} ({sector}): {cnt} signals{ret_str}")
-        for s in c.get("signals", []):
-            sig_line = f"    {display_name(s['type'], s['direction'])}"
-            if s.get("avg_return_10d"):
-                sig_line += f" — avg 10d: {s['avg_return_10d']:+.2f}%"
-            if s.get("description"):
-                sig_line += f" — {s['description']}"
-            lines.append(sig_line)
-        if c.get("broker_narrative"):
-            narr = c["broker_narrative"]
-            if len(narr) > 200:
-                narr = narr[:200] + "..."
-            lines.append(f"    brokers: {narr}")
-    return "\n".join(lines)
+    picks = [c for c in scanner if c.get("tier") == "pick"]
+    notables = [c for c in scanner if c.get("tier") == "notable"]
+    # Backwards compat: entries without tier go to picks
+    untagged = [c for c in scanner if "tier" not in c]
+    picks.extend(untagged)
+
+    lines = []
+
+    if picks:
+        lines.append("Scanner picks:")
+        for c in picks:
+            lines.extend(_fmt_scanner_candidate(c))
+
+    if notables:
+        lines.append("Also notable:")
+        for c in notables:
+            lines.extend(_fmt_scanner_candidate(c))
+
+    return "\n".join(lines) if lines else "Scanner: no candidates today."
+
+
+def _fmt_scanner_candidate(c):
+    lines = []
+    sym = c["symbol"]
+    cnt = c["signal_count"]
+    sector = c.get("sector", "")
+    r5 = c.get("return_5d")
+    r10 = c.get("return_10d")
+    r20 = c.get("return_20d")
+    ret_str = ""
+    if r5 is not None:
+        ret_str = f" [5d:{r5:+.1f}% 10d:{r10:+.1f}% 20d:{r20:+.1f}%]"
+
+    tag = _momentum_tag(c)
+    lines.append(f"  {sym} ({sector}): {cnt} signals{ret_str}{tag}")
+    for s in c.get("signals", []):
+        sig_line = f"    {display_name(s['type'], s['direction'])}"
+        if s.get("avg_return_10d"):
+            sig_line += f" — avg 10d: {s['avg_return_10d']:+.2f}%"
+        if s.get("description"):
+            sig_line += f" — {s['description']}"
+        lines.append(sig_line)
+    if c.get("broker_narrative"):
+        narr = c["broker_narrative"]
+        if len(narr) > 200:
+            narr = narr[:200] + "..."
+        lines.append(f"    brokers: {narr}")
+    return lines
 
 
 def _section_news(db, cfg):

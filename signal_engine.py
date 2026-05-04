@@ -14,12 +14,12 @@ BROKER_INDIVIDUAL_THRESHOLD = 0.005  # 0.5% of turnover per broker
 SIGNAL_DISPLAY_NAMES = {
     ("broker_significance", "bullish"): "Broker Accumulation",
     ("broker_significance", "bearish"): "Broker Distribution",
-    ("buyer_seller_imbalance", "bullish"): "Absorption",
-    ("ema_cross", "bullish"): "EMA Cross",
+    ("buyer_seller_imbalance", "bullish"): "Stealth Buying",
+    ("ema_cross", "bullish"): "Golden Cross",
     ("macd_histogram_flip", "bullish"): "MACD Flip",
-    ("volume_spike", "bullish"): "Volume Spike",
-    ("bb_squeeze_release", "bullish"): "Squeeze Break",
-    ("sr_break", "bearish"): "Support Break",
+    ("volume_spike", "bullish"): "Volume Breakout",
+    ("bb_squeeze_release", "bullish"): "BB Squeeze Release",
+    ("sr_break", "bullish"): "Falling Knife",
 }
 
 
@@ -315,7 +315,7 @@ def _eval_sr_break(db, price_today, price_yesterday, ind_today, symbol, date):
         if ltype == "support" and close_y >= level and close_t < level and vr >= 2.0:
             signals.append(Signal(
                 signal_type="sr_break",
-                symbol=symbol, date=date, direction="bearish",
+                symbol=symbol, date=date, direction="bullish",
                 value=level,
                 description=f"Broke support {level:,.0f} ({touches} touches) on {vr:.1f}x volume",
                 meta={"touch_count": touches, "volume_ratio": round(vr, 2)},

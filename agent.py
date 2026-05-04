@@ -23,6 +23,56 @@ from tools import TOOL_DEFINITIONS, handle_tool
 SCRIPT_DIR = Path(__file__).resolve().parent
 log = logging.getLogger(__name__)
 
+MAX_HISTORY_CHARS = 120_000  # ~30K tokens, leaves room for system prompt + tools + response
+
+
+def _estimate_chars(message):
+    """Estimate character count of a message for sliding window."""
+    content = message.get("content", "")
+    if isinstance(content, str):
+        return len(content)
+    if isinstance(content, list):
+        total = 0
+        for block in content:
+            if isinstance(block, dict):
+                total += len(str(block.get("content", "")))
+            elif hasattr(block, "text"):
+                total += len(block.text)
+            else:
+                total += len(str(block))
+        return total
+    return len(str(content))
+
+
+def _trim_history(messages, max_chars=MAX_HISTORY_CHARS):
+    """Trim oldest messages to stay within token budget.
+
+    Keeps the most recent messages. When trimming occurs, inserts a note
+    so the model knows earlier context was dropped.
+    """
+    total = sum(_estimate_chars(m) for m in messages)
+    if total <= max_chars:
+        return messages
+
+    trimmed = list(messages)
+    while len(trimmed) > 2 and sum(_estimate_chars(m) for m in trimmed) > max_chars:
+        trimmed.pop(0)
+
+    # Ensure first message is a user message (API requirement)
+    if trimmed and trimmed[0].get("role") != "user":
+        trimmed.pop(0)
+
+    trimmed.insert(0, {
+        "role": "user",
+        "content": "[Earlier conversation trimmed to fit context window. Recent messages follow.]",
+    })
+    trimmed.insert(1, {
+        "role": "assistant",
+        "content": "Understood, continuing from recent context.",
+    })
+
+    return trimmed
+
 
 def _extract_text(content):
     """Extract text from response content blocks, skipping ThinkingBlocks."""
@@ -113,11 +163,13 @@ def run_conversation(cfg, user_message, session_id=None):
         turns += 1
         log.info("turn %d/%d", turns, max_turns)
 
+        api_messages = _trim_history(messages)
+
         response = client.messages.create(
             model=model,
             max_tokens=max_tokens,
             system=system,
-            messages=messages,
+            messages=api_messages,
             tools=TOOL_DEFINITIONS,
         )
 

@@ -10,6 +10,8 @@ from signal_engine import evaluate_all
 # Minimum avg daily value (IDR) to include in scanner output
 LIQUIDITY_FLOOR = 500_000_000
 
+NOTABLE_SIGNAL_TYPES = {"volume_spike", "broker_significance", "sr_break"}
+
 
 def _liquidity_percentiles(db):
     """Compute liquidity percentile for each stock in scan_pool."""
@@ -62,17 +64,18 @@ def _get_base_rates(db, signal_type, direction, symbol, min_samples=15):
     return None, None
 
 
-def scan(cfg, signals_by_symbol=None, top_n=5, use_base_rates=False):
+def scan(cfg, signals_by_symbol=None, top_n=5, notable_n=5, use_base_rates=False):
     """Run the scanner funnel.
 
     Args:
         cfg: config dict
         signals_by_symbol: pre-computed signals from evaluate_all().
             If None, evaluates signals fresh.
-        top_n: max candidates to return
+        top_n: max "pick" candidates to return
+        notable_n: max "notable" candidates (single strong signal)
         use_base_rates: if True, only count signals with >55% hit rate
 
-    Returns list of scanner candidates sorted by signal count (descending).
+    Returns list of scanner candidates sorted by tier (pick first, then notable).
     """
     db = get_db(cfg)
 
@@ -82,7 +85,8 @@ def scan(cfg, signals_by_symbol=None, top_n=5, use_base_rates=False):
     liquidity = _liquidity_percentiles(db)
     watchlist = {s.replace(".JK", "") for s in cfg.get("watchlist", [])}
 
-    candidates = []
+    picks = []
+    notables = []
     for symbol, sigs in signals_by_symbol.items():
         adv_row = db.execute(
             """SELECT AVG(value) as adv FROM (
@@ -111,9 +115,6 @@ def scan(cfg, signals_by_symbol=None, top_n=5, use_base_rates=False):
             signal_count = len(unique_types)
             counted_signals = [{"signal": s, "avg_return": None, "scope": None} for s in sigs]
 
-        if signal_count < 2:
-            continue
-
         # Sector info
         sector_row = db.execute(
             "SELECT sector_name FROM companies WHERE symbol = ?",
@@ -121,7 +122,20 @@ def scan(cfg, signals_by_symbol=None, top_n=5, use_base_rates=False):
         ).fetchone()
         sector = sector_row["sector_name"] if sector_row else ""
 
-        # Days in scanner (how many recent days this stock had 3+ signals)
+        # Momentum data
+        ind_row = db.execute(
+            """SELECT i.ema200, i.rsi, p.close
+               FROM indicators i
+               JOIN prices p ON i.symbol = p.symbol AND i.date = p.date
+               WHERE i.symbol = ?
+               ORDER BY i.date DESC LIMIT 1""",
+            (symbol,),
+        ).fetchone()
+        ema200 = ind_row["ema200"] if ind_row else None
+        rsi = ind_row["rsi"] if ind_row else None
+        close = ind_row["close"] if ind_row else None
+
+        # Days in scanner
         recent_hits = db.execute(
             """SELECT COUNT(DISTINCT date) as days FROM signal_events
                WHERE symbol = ? AND date >= date(?, '-7 days')""",
@@ -129,7 +143,7 @@ def scan(cfg, signals_by_symbol=None, top_n=5, use_base_rates=False):
         ).fetchone()
         days_in_scanner = recent_hits["days"] if recent_hits else 1
 
-        candidates.append({
+        candidate = {
             "symbol": symbol,
             "signal_count": signal_count,
             "signals": [
@@ -148,9 +162,22 @@ def scan(cfg, signals_by_symbol=None, top_n=5, use_base_rates=False):
             "sector": sector,
             "days_in_scanner": days_in_scanner,
             "in_watchlist": symbol in watchlist,
-        })
+            "ema200": ema200,
+            "rsi": rsi,
+            "close": close,
+        }
 
-    candidates.sort(key=lambda x: x["signal_count"], reverse=True)
+        if signal_count >= 2:
+            candidate["tier"] = "pick"
+            picks.append(candidate)
+        elif signal_count == 1:
+            sig_type = counted_signals[0]["signal"].signal_type if not isinstance(counted_signals[0]["signal"], dict) else counted_signals[0]["signal"]["signal_type"]
+            if sig_type in NOTABLE_SIGNAL_TYPES:
+                candidate["tier"] = "notable"
+                notables.append(candidate)
+
+    picks.sort(key=lambda x: x["signal_count"], reverse=True)
+    notables.sort(key=lambda x: x["liquidity_percentile"], reverse=True)
 
     db.close()
-    return candidates[:top_n]
+    return picks[:top_n] + notables[:notable_n]

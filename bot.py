@@ -247,6 +247,24 @@ async def cmd_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n\n".join(lines), parse_mode=ParseMode.HTML)
 
 
+async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    cfg = _load_config()
+    if not _authorized(update, cfg):
+        return
+
+    user_id = update.effective_user.id
+    session = _get_session(user_id)
+
+    if session["session_id"]:
+        try:
+            close_session(cfg, session["session_id"])
+        except Exception:
+            pass
+        session["session_id"] = None
+
+    await update.message.reply_text("Session reset. Starting fresh.")
+
+
 async def cmd_note(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cfg = _load_config()
     if not _authorized(update, cfg):
@@ -445,6 +463,7 @@ async def _post_init(app: Application):
         BotCommand("portfolio", "Portfolio positions & PnL"),
         BotCommand("note", "Save thesis — /note SYMBOL text"),
         BotCommand("recall", "Recall theses — /recall [SYMBOL]"),
+        BotCommand("reset", "Reset conversation session"),
     ])
 
 
@@ -464,6 +483,7 @@ def run_bot():
     app.add_handler(CommandHandler("portfolio", cmd_portfolio))
     app.add_handler(CommandHandler("note", cmd_note))
     app.add_handler(CommandHandler("recall", cmd_recall))
+    app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     schedule_cfg = cfg.get("schedule", {}).get("eod_brief", {})

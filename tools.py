@@ -89,7 +89,11 @@ TOOL_DEFINITIONS = [
             "relative_strength(symbol, date, vs_ihsg_5d/10d/20d, vs_sector_5d/10d/20d)\n"
             "positions(symbol, avg_cost, total_lots, stop_loss)\n"
             "trades(symbol, date, action, lots, price, fees, notes)\n"
-            "scan_pool(symbol, market_cap, rank)"
+            "scan_pool(symbol, market_cap, rank)\n\n"
+            "Signal display names (always use these instead of raw signal_type in responses):\n"
+            "broker_significance=Broker Accumulation/Distribution, buyer_seller_imbalance=Stealth Buying, "
+            "ema_cross=Golden Cross, macd_histogram_flip=MACD Flip, volume_spike=Volume Breakout, "
+            "bb_squeeze_release=BB Squeeze Release, sr_break=Falling Knife"
         ),
         "input_schema": {
             "type": "object",
