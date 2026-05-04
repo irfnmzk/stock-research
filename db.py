@@ -319,6 +319,12 @@ CREATE TABLE IF NOT EXISTS conversation_turns (
 );
 
 CREATE INDEX IF NOT EXISTS idx_conv_session ON conversation_turns(session_id);
+
+CREATE TABLE IF NOT EXISTS watchlist (
+    symbol      TEXT PRIMARY KEY,
+    added_at    TEXT NOT NULL,
+    notes       TEXT
+);
 """
 
 
@@ -377,3 +383,24 @@ def get_db(cfg) -> sqlite3.Connection:
     conn.executescript(SCHEMA)
     _migrate(conn)
     return conn
+
+
+def get_watchlist(cfg) -> list[str]:
+    """Get watchlist symbols from DB, seeding from config on first use."""
+    db = get_db(cfg)
+    rows = db.execute("SELECT symbol FROM watchlist ORDER BY added_at").fetchall()
+
+    if not rows:
+        from datetime import datetime
+        now = datetime.now().isoformat()
+        for s in cfg.get("watchlist", []):
+            symbol = s.replace(".JK", "")
+            db.execute(
+                "INSERT OR IGNORE INTO watchlist (symbol, added_at) VALUES (?, ?)",
+                (symbol, now),
+            )
+        db.commit()
+        rows = db.execute("SELECT symbol FROM watchlist ORDER BY added_at").fetchall()
+
+    db.close()
+    return [r["symbol"] for r in rows]

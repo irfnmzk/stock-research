@@ -1,15 +1,18 @@
 """Stockbit API client with automatic token rotation."""
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
 
 import httpx
 
+logger = logging.getLogger(__name__)
+
 BASE_URL = "https://exodus.stockbit.com"
 TOKEN_FILE = Path(__file__).parent / "data" / ".tokens.json"
-ENV_FILE = Path(__file__).parent / "data" / ".env"
+ENV_FILE = Path(__file__).parent / ".env"
 
 
 def _load_env():
@@ -34,22 +37,23 @@ class TokenManager:
         self._load()
 
     def _load(self):
-        # STOCKBIT_TOKEN = plain access token, no refresh needed
         env_token = os.environ.get("STOCKBIT_TOKEN")
         if env_token:
             self.access_token = env_token
-            self.expires_at = time.time() + 86400 * 365  # treat as never-expiring
+            self.expires_at = time.time() + 86400 * 365
             self._static = True
             return
 
-        # Refresh token flow
-        env_rt = os.environ.get("STOCKBIT_REFRESH_TOKEN")
         if TOKEN_FILE.exists():
             data = json.loads(TOKEN_FILE.read_text())
             self.access_token = data.get("access_token")
             self.refresh_token = data.get("refresh_token")
             self.expires_at = data.get("expires_at", 0)
-        if env_rt and not self.refresh_token:
+            if self.refresh_token:
+                return
+
+        env_rt = os.environ.get("STOCKBIT_REFRESH_TOKEN")
+        if env_rt:
             self.refresh_token = env_rt
 
     def _save(self):
@@ -74,23 +78,29 @@ class TokenManager:
             raise RuntimeError(
                 "No token. Set STOCKBIT_TOKEN (access token) or STOCKBIT_REFRESH_TOKEN env var"
             )
-        resp = httpx.post(
-            f"{BASE_URL}/login/refresh",
-            headers={"Authorization": f"Bearer {self.refresh_token}"},
-            timeout=15,
-        )
-        resp.raise_for_status()
+        try:
+            resp = httpx.post(
+                f"{BASE_URL}/login/refresh",
+                headers={"Authorization": f"Bearer {self.refresh_token}"},
+                timeout=15,
+            )
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(
+                f"Token refresh failed ({e.response.status_code}). "
+                f"The refresh token may be expired. "
+                f"Delete {TOKEN_FILE} and set a fresh STOCKBIT_REFRESH_TOKEN, then restart."
+            ) from e
         body = resp.json()
         data = body.get("data", body)
-        # Response structure: data.access.token, data.refresh.token
         access_data = data.get("access", data)
         refresh_data = data.get("refresh", {})
         self.access_token = access_data.get("token") or access_data.get("access_token")
-        if refresh_data.get("token"):
-            self.refresh_token = refresh_data["token"]
-        elif data.get("refresh_token"):
-            self.refresh_token = data["refresh_token"]
-        # Parse expiry from expired_at or fallback to 24h
+        new_rt = refresh_data.get("token") or data.get("refresh_token")
+        if new_rt:
+            self.refresh_token = new_rt
+        else:
+            logger.warning("API did not return a new refresh token — next refresh will fail")
         expired_at = access_data.get("expired_at")
         if expired_at:
             from datetime import datetime

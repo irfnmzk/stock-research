@@ -7,8 +7,10 @@ from db import get_db
 
 
 def _resolve_symbols(cfg, symbols=None):
-    syms = symbols or cfg["watchlist"]
-    return [s.replace(".JK", "") for s in syms]
+    if symbols:
+        return [s.replace(".JK", "") for s in symbols]
+    from db import get_watchlist
+    return get_watchlist(cfg)
 
 
 def _load_prices(db, symbol):

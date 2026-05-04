@@ -132,7 +132,8 @@ def _get_pool_symbols(cfg):
     pool = [r["symbol"] for r in rows]
     if not pool:
         log.warning("scan_pool empty, falling back to watchlist")
-        pool = [s.replace(".JK", "") for s in cfg["watchlist"]]
+        from db import get_watchlist
+        pool = get_watchlist(cfg)
     return pool
 
 
@@ -234,7 +235,8 @@ def step_assemble(cfg, signals_by_symbol=None) -> dict:
     log.info("  Scanner: %d candidates", len(scanner_candidates))
 
     # 3. Watchlist signals
-    watchlist_symbols = [s.replace(".JK", "") for s in cfg.get("watchlist", [])]
+    from db import get_watchlist
+    watchlist_symbols = get_watchlist(cfg)
     watchlist = {}
     db = get_db(cfg)
 
@@ -363,7 +365,8 @@ def step_charts(cfg, data: dict, chart_days=90) -> list[str]:
     from charts import render_chart
 
     chart_paths = []
-    symbols = [s.replace(".JK", "") for s in cfg["watchlist"]]
+    from db import get_watchlist
+    symbols = get_watchlist(cfg)
 
     # Watchlist charts
     for symbol in symbols:

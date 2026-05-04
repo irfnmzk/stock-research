@@ -373,7 +373,8 @@ def evaluate_all(cfg, date=None, symbols=None):
         rows = db.execute("SELECT symbol FROM scan_pool ORDER BY rank").fetchall()
         symbols = [r["symbol"] for r in rows]
         if not symbols:
-            symbols = [s.replace(".JK", "") for s in cfg["watchlist"]]
+            from db import get_watchlist
+            symbols = get_watchlist(cfg)
 
     results = {}
     for symbol in symbols:

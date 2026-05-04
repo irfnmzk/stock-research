@@ -83,7 +83,11 @@ def detect(cfg, db, symbol):
 def detect_all(cfg, symbols=None):
     """Detect S/R for all watchlist symbols."""
     db = get_db(cfg)
-    syms = symbols or cfg["watchlist"]
+    if symbols:
+        syms = symbols
+    else:
+        from db import get_watchlist
+        syms = get_watchlist(cfg)
     for s in syms:
         symbol = s.replace(".JK", "")
         print(f"Detecting S/R for {symbol}...")

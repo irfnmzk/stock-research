@@ -163,7 +163,8 @@ def compute_all(cfg, symbols=None):
     """Compute temporal fields for all symbols."""
     db = get_db(cfg)
     if symbols is None:
-        symbols = [s.replace(".JK", "") for s in cfg["watchlist"]]
+        from db import get_watchlist
+        symbols = get_watchlist(cfg)
     for symbol in symbols:
         compute_temporal(cfg, db, symbol)
     db.close()

@@ -10,7 +10,8 @@ def _symbols(cfg, override=None):
     """Return plain symbol list (no .JK suffix)."""
     if override:
         return [s.replace(".JK", "") for s in override]
-    return [s.replace(".JK", "") for s in cfg["watchlist"]]
+    from db import get_watchlist
+    return get_watchlist(cfg)
 
 
 def _pool_symbols(cfg):

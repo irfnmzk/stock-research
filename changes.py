@@ -31,7 +31,8 @@ def detect_changes(cfg, date=None, symbols=None):
         return []
 
     if symbols is None:
-        symbols = [s.replace(".JK", "") for s in cfg.get("watchlist", [])]
+        from db import get_watchlist
+        symbols = get_watchlist(cfg)
 
     changes = []
 

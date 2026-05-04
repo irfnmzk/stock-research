@@ -9,7 +9,11 @@ def fetch_news(cfg, symbols=None):
     sb = StockbitClient()
     db = get_db(cfg)
 
-    syms = symbols or [s.replace(".JK", "") for s in cfg["watchlist"]]
+    if symbols:
+        syms = symbols
+    else:
+        from db import get_watchlist
+        syms = get_watchlist(cfg)
     total = 0
 
     for symbol in syms:

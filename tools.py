@@ -126,6 +126,36 @@ TOOL_DEFINITIONS = [
         },
     },
     {
+        "name": "watchlist",
+        "description": "Show the current watchlist.",
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
+        "name": "watchlist_add",
+        "description": "Add a stock to the watchlist. Use when the user asks to watch or track a stock.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Stock ticker symbol (e.g. ITMG, BBCA)"},
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "watchlist_remove",
+        "description": "Remove a stock from the watchlist.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Stock ticker symbol to remove"},
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
         "name": "refresh",
         "description": "Fetch latest data for a single ticker from Stockbit (prices, broker summary) and recompute indicators, signals, and support/resistance. Call this before ticker_deep_dive when the user asks about a stock mid-day and needs fresh data.",
         "input_schema": {
@@ -151,6 +181,9 @@ def handle_tool(cfg, tool_name, tool_input):
         "note": _handle_note,
         "recall": _handle_recall,
         "refresh": _handle_refresh,
+        "watchlist": _handle_watchlist,
+        "watchlist_add": _handle_watchlist_add,
+        "watchlist_remove": _handle_watchlist_remove,
     }
     handler = handlers.get(tool_name)
     if not handler:
@@ -462,3 +495,45 @@ def _handle_refresh(cfg, inp):
     now = datetime.now().strftime("%H:%M")
     sig_count = len(signals.get(symbol, []))
     return f"{symbol} refreshed at {now} ({', '.join(steps)}). {sig_count} active signal(s)."
+
+
+def _handle_watchlist(cfg, _inp):
+    from db import get_watchlist
+    symbols = get_watchlist(cfg)
+    if not symbols:
+        return "Watchlist is empty."
+    return "Watchlist: " + ", ".join(symbols)
+
+
+def _handle_watchlist_add(cfg, inp):
+    from datetime import datetime
+    symbol = inp["symbol"].upper().replace(".JK", "")
+    db = get_db(cfg)
+
+    existing = db.execute("SELECT 1 FROM watchlist WHERE symbol = ?", (symbol,)).fetchone()
+    if existing:
+        db.close()
+        return f"{symbol} is already on the watchlist."
+
+    db.execute(
+        "INSERT INTO watchlist (symbol, added_at) VALUES (?, ?)",
+        (symbol, datetime.now().isoformat()),
+    )
+    db.commit()
+    db.close()
+    return f"{symbol} added to watchlist."
+
+
+def _handle_watchlist_remove(cfg, inp):
+    symbol = inp["symbol"].upper().replace(".JK", "")
+    db = get_db(cfg)
+
+    existing = db.execute("SELECT 1 FROM watchlist WHERE symbol = ?", (symbol,)).fetchone()
+    if not existing:
+        db.close()
+        return f"{symbol} is not on the watchlist."
+
+    db.execute("DELETE FROM watchlist WHERE symbol = ?", (symbol,))
+    db.commit()
+    db.close()
+    return f"{symbol} removed from watchlist."

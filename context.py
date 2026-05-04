@@ -191,7 +191,8 @@ def _fmt_scanner_candidate(c):
 def _section_news(db, cfg):
     from datetime import datetime, timedelta
     cutoff = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
-    watchlist = [s.replace(".JK", "") for s in cfg.get("watchlist", [])]
+    from db import get_watchlist
+    watchlist = get_watchlist(cfg)
     if not watchlist:
         return ""
 

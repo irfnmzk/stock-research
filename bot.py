@@ -175,7 +175,8 @@ async def cmd_brief(update: Update, context: ContextTypes.DEFAULT_TYPE):
         stocks = brief.get("stocks", {})
         overview = brief.get("overview", "")
         chart_dir = SCRIPT_DIR / cfg.get("charts", {}).get("output_dir", "data/charts")
-        watchlist = [s.replace(".JK", "") for s in cfg.get("watchlist", [])]
+        from db import get_watchlist
+        watchlist = get_watchlist(cfg)
 
         all_symbols = list(watchlist)
         for sym in stocks:
@@ -364,7 +365,8 @@ async def trigger_eod_brief(cfg, app: Application):
         overview = brief.get("overview", "")
 
         chart_dir = SCRIPT_DIR / cfg.get("charts", {}).get("output_dir", "data/charts")
-        watchlist = [s.replace(".JK", "") for s in cfg.get("watchlist", [])]
+        from db import get_watchlist
+        watchlist = get_watchlist(cfg)
 
         # Collect all stock photos: watchlist first, then scanner
         all_symbols = list(watchlist)

@@ -83,7 +83,8 @@ def scan(cfg, signals_by_symbol=None, top_n=5, notable_n=5, use_base_rates=False
         signals_by_symbol = evaluate_all(cfg)
 
     liquidity = _liquidity_percentiles(db)
-    watchlist = {s.replace(".JK", "") for s in cfg.get("watchlist", [])}
+    from db import get_watchlist
+    watchlist = set(get_watchlist(cfg))
 
     picks = []
     notables = []

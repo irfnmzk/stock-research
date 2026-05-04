@@ -67,7 +67,11 @@ def compute_whale_score(cfg, db, symbol):
 def compute_all(cfg, symbols=None):
     """Compute whale scores for all watchlist symbols."""
     db = get_db(cfg)
-    syms = symbols or cfg["watchlist"]
+    if symbols:
+        syms = symbols
+    else:
+        from db import get_watchlist
+        syms = get_watchlist(cfg)
     for s in syms:
         symbol = s.replace(".JK", "")
         score = compute_whale_score(cfg, db, symbol)
