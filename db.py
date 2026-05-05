@@ -385,6 +385,123 @@ def get_db(cfg) -> sqlite3.Connection:
     return conn
 
 
+US_SCHEMA = """
+CREATE TABLE IF NOT EXISTS assets (
+    pluang_id   INTEGER PRIMARY KEY,
+    ticker      TEXT UNIQUE NOT NULL,
+    name        TEXT,
+    quote_type  TEXT,
+    sector      TEXT,
+    industry    TEXT,
+    sector_etf  TEXT,
+    market_cap  REAL,
+    active      INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS prices (
+    ticker  TEXT NOT NULL,
+    date    TEXT NOT NULL,
+    open    REAL,
+    high    REAL,
+    low     REAL,
+    close   REAL,
+    PRIMARY KEY (ticker, date)
+);
+
+CREATE TABLE IF NOT EXISTS indicators (
+    ticker      TEXT NOT NULL,
+    date        TEXT NOT NULL,
+    ema10       REAL,
+    ema21       REAL,
+    ema50       REAL,
+    ema200      REAL,
+    rsi         REAL,
+    macd        REAL,
+    macd_signal REAL,
+    macd_hist   REAL,
+    bb_upper    REAL,
+    bb_lower    REAL,
+    bb_width    REAL,
+    atr         REAL,
+    adr_pct     REAL,
+    PRIMARY KEY (ticker, date)
+);
+
+CREATE TABLE IF NOT EXISTS support_resistance (
+    ticker          TEXT NOT NULL,
+    level           REAL NOT NULL,
+    level_type      TEXT NOT NULL,
+    touch_count     INTEGER DEFAULT 1,
+    last_touched    TEXT,
+    strength_score  REAL,
+    PRIMARY KEY (ticker, level, level_type)
+);
+
+CREATE TABLE IF NOT EXISTS relative_strength (
+    ticker              TEXT NOT NULL,
+    date                TEXT NOT NULL,
+    rs_vs_spy_10d       REAL,
+    rs_vs_spy_20d       REAL,
+    rs_vs_sector_10d    REAL,
+    rs_vs_sector_20d    REAL,
+    PRIMARY KEY (ticker, date)
+);
+
+CREATE TABLE IF NOT EXISTS sector_rotation (
+    sector_etf  TEXT NOT NULL,
+    date        TEXT NOT NULL,
+    pct_5d      REAL,
+    pct_10d     REAL,
+    pct_20d     REAL,
+    momentum    REAL,
+    rank        INTEGER,
+    PRIMARY KEY (sector_etf, date)
+);
+
+CREATE TABLE IF NOT EXISTS signal_events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker      TEXT NOT NULL,
+    date        TEXT NOT NULL,
+    signal_type TEXT NOT NULL,
+    direction   TEXT NOT NULL,
+    magnitude   REAL,
+    close       REAL,
+    meta        TEXT,
+    fwd_5d      REAL,
+    fwd_10d     REAL,
+    fwd_20d     REAL
+);
+
+CREATE TABLE IF NOT EXISTS signal_base_rates (
+    signal_type     TEXT PRIMARY KEY,
+    sample_size     INTEGER,
+    hit_rate_5d     REAL,
+    hit_rate_10d    REAL,
+    hit_rate_20d    REAL,
+    avg_return_5d   REAL,
+    avg_return_10d  REAL,
+    avg_return_20d  REAL,
+    last_computed   TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_us_prices ON prices(ticker, date);
+CREATE INDEX IF NOT EXISTS idx_us_indicators ON indicators(ticker, date);
+CREATE INDEX IF NOT EXISTS idx_us_rs ON relative_strength(ticker, date);
+CREATE INDEX IF NOT EXISTS idx_us_signals ON signal_events(ticker, date);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_us_signals_dedup ON signal_events(ticker, date, signal_type);
+"""
+
+
+def get_us_db() -> sqlite3.Connection:
+    """Open (and initialize) the US stock database."""
+    db_path = Path(__file__).parent / "data" / "us.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path), timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.executescript(US_SCHEMA)
+    return conn
+
+
 def get_watchlist(cfg) -> list[str]:
     """Get watchlist symbols from DB, seeding from config on first use."""
     db = get_db(cfg)

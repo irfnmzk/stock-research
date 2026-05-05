@@ -190,6 +190,42 @@ def cmd_bot(args, cfg):
     run_bot()
 
 
+def cmd_us_seed(args, cfg):
+    """Seed US assets from Pluang reference JSON."""
+    from fetcher_us import seed_assets
+    seed_assets()
+
+
+def cmd_us_seed_sectors(args, cfg):
+    """Seed sector/industry from yfinance."""
+    from fetcher_us import seed_sectors
+    seed_sectors()
+
+
+def cmd_us_fetch(args, cfg):
+    """Fetch US prices from Pluang."""
+    from fetcher_us import fetch_prices
+    fetch_prices(days=args.days)
+
+
+def cmd_us_pipeline(args, cfg):
+    """Run full US daily pipeline."""
+    from fetcher_us import run_pipeline
+    run_pipeline(days=args.days)
+
+
+def cmd_us_scan(args, cfg):
+    """Run US scanner."""
+    from scanner_us import scan, format_scan_output
+    from db import get_us_db
+    candidates = scan(top_n=args.top)
+    db = get_us_db()
+    br_rows = db.execute("SELECT * FROM signal_base_rates").fetchall()
+    base_rates = {r["signal_type"]: dict(r) for r in br_rows}
+    db.close()
+    print(format_scan_output(candidates, base_rates=base_rates))
+
+
 def cmd_fetch_all(args, cfg):
     """Run full daily fetch pipeline: prices, brokers, fundamentals, news."""
     from fetcher import fetch_prices, fetch_broker_summary, fetch_fundamentals
@@ -323,6 +359,19 @@ def cli():
     # bot
     sub.add_parser("bot", help="start the Telegram bot")
 
+    # --- US commands ---
+    sub.add_parser("us-seed", help="seed US assets from Pluang reference JSON")
+    sub.add_parser("us-seed-sectors", help="seed US sector/industry from yfinance")
+
+    p = sub.add_parser("us-fetch", help="fetch US prices from Pluang")
+    p.add_argument("--days", type=int, default=365, help="days of history (default: 365)")
+
+    p = sub.add_parser("us-pipeline", help="run full US daily pipeline")
+    p.add_argument("--days", type=int, default=365, help="days of history (default: 365)")
+
+    p = sub.add_parser("us-scan", help="run US stock scanner")
+    p.add_argument("--top", type=int, default=15, help="max results (default: 15)")
+
     args = parser.parse_args()
     cfg = load_config(args.config)
 
@@ -351,6 +400,11 @@ def cli():
         "agent-chat": cmd_agent_chat,
         "send-brief": cmd_send_brief,
         "bot": cmd_bot,
+        "us-seed": cmd_us_seed,
+        "us-seed-sectors": cmd_us_seed_sectors,
+        "us-fetch": cmd_us_fetch,
+        "us-pipeline": cmd_us_pipeline,
+        "us-scan": cmd_us_scan,
     }
     commands[args.command](args, cfg)
 

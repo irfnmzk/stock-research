@@ -166,6 +166,27 @@ TOOL_DEFINITIONS = [
             "required": ["symbol"],
         },
     },
+    {
+        "name": "scan_us",
+        "description": "Run the US stock scanner. Returns top picks ranked by relative strength and signal count. Uses RS-first funnel: stocks must outperform SPY, then ranked by signal confluence.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "top_n": {"type": "integer", "description": "Max results (default 15)", "default": 15},
+            },
+        },
+    },
+    {
+        "name": "analyze_us",
+        "description": "Deep dive analysis on a single US stock. Shows trend structure, EMA alignment, key S/R levels, recent signals, relative strength vs SPY and sector, and risk factors.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "ticker": {"type": "string", "description": "US stock ticker (e.g. NVDA, AAPL)"},
+            },
+            "required": ["ticker"],
+        },
+    },
 ]
 
 
@@ -184,6 +205,8 @@ def handle_tool(cfg, tool_name, tool_input):
         "watchlist": _handle_watchlist,
         "watchlist_add": _handle_watchlist_add,
         "watchlist_remove": _handle_watchlist_remove,
+        "scan_us": _handle_scan_us,
+        "analyze_us": _handle_analyze_us,
     }
     handler = handlers.get(tool_name)
     if not handler:
@@ -537,3 +560,150 @@ def _handle_watchlist_remove(cfg, inp):
     db.commit()
     db.close()
     return f"{symbol} removed from watchlist."
+
+
+def _handle_scan_us(_cfg, inp):
+    from scanner_us import scan, format_scan_output
+    from db import get_us_db
+    top_n = inp.get("top_n", 15)
+    candidates = scan(top_n=top_n)
+    db = get_us_db()
+    br_rows = db.execute("SELECT * FROM signal_base_rates").fetchall()
+    base_rates = {r["signal_type"]: dict(r) for r in br_rows}
+    db.close()
+    return format_scan_output(candidates, base_rates=base_rates)
+
+
+def _handle_analyze_us(_cfg, inp):
+    from db import get_us_db
+
+    ticker = inp["ticker"].upper()
+    db = get_us_db()
+
+    hist = db.execute(
+        "SELECT date, close FROM prices WHERE ticker = ? ORDER BY date DESC LIMIT 21",
+        (ticker,),
+    ).fetchall()
+
+    if not hist:
+        db.close()
+        return f"No data for {ticker}. It may not be in the Pluang universe."
+
+    close = hist[0]["close"]
+    parts = [f"Price: ${close:.2f}"]
+    if len(hist) > 5:
+        parts.append(f"5d: {(close - hist[5]['close']) / hist[5]['close'] * 100:+.1f}%")
+    if len(hist) > 10:
+        parts.append(f"10d: {(close - hist[10]['close']) / hist[10]['close'] * 100:+.1f}%")
+    if len(hist) > 20:
+        parts.append(f"20d: {(close - hist[20]['close']) / hist[20]['close'] * 100:+.1f}%")
+    price_info = ", ".join(parts)
+
+    ind = db.execute(
+        "SELECT * FROM indicators WHERE ticker = ? ORDER BY date DESC LIMIT 1",
+        (ticker,),
+    ).fetchone()
+
+    rs = db.execute(
+        "SELECT * FROM relative_strength WHERE ticker = ? ORDER BY date DESC LIMIT 1",
+        (ticker,),
+    ).fetchone()
+
+    sr_rows = db.execute(
+        "SELECT level, level_type, touch_count FROM support_resistance WHERE ticker = ? ORDER BY level",
+        (ticker,),
+    ).fetchall()
+    supports = [f"${r['level']:.2f} ({r['touch_count']}t)" for r in sr_rows if r["level_type"] == "support" and r["level"] < close]
+    resistances = [f"${r['level']:.2f} ({r['touch_count']}t)" for r in sr_rows if r["level_type"] == "resistance" and r["level"] > close]
+
+    signals = db.execute(
+        """SELECT signal_type, date, direction, magnitude, meta
+           FROM signal_events WHERE ticker = ? ORDER BY date DESC LIMIT 10""",
+        (ticker,),
+    ).fetchall()
+
+    asset = db.execute(
+        "SELECT sector, industry, sector_etf FROM assets WHERE ticker = ?",
+        (ticker,),
+    ).fetchone()
+
+    # Load base rates
+    base_rates = {}
+    br_rows = db.execute("SELECT * FROM signal_base_rates").fetchall()
+    for br in br_rows:
+        base_rates[br["signal_type"]] = br
+
+    sector_rank = None
+    if asset and asset["sector_etf"]:
+        rot = db.execute(
+            "SELECT rank, pct_5d FROM sector_rotation WHERE sector_etf = ? ORDER BY date DESC LIMIT 1",
+            (asset["sector_etf"],),
+        ).fetchone()
+        if rot:
+            sector_rank = rot
+
+    db.close()
+
+    lines = [f"=== {ticker} Deep Dive ===", price_info]
+
+    if asset:
+        lines.append(f"Sector: {asset['sector']} / {asset['industry']} (ETF: {asset['sector_etf']})")
+
+    if ind:
+        ema_line = f"EMA10: {ind['ema10']:.2f}, EMA21: {ind['ema21']:.2f}, EMA50: {ind['ema50']:.2f}, EMA200: {ind['ema200']:.2f}" if ind["ema200"] else ""
+        if ema_line:
+            lines.append(ema_line)
+        extras = []
+        if ind["rsi"]:
+            extras.append(f"RSI: {ind['rsi']:.0f}")
+        if ind["adr_pct"]:
+            extras.append(f"ADR: {ind['adr_pct']:.1f}%")
+        if ind["bb_width"]:
+            extras.append(f"BB width: {ind['bb_width']:.3f}")
+        if extras:
+            lines.append(", ".join(extras))
+
+    if rs:
+        rs_parts = []
+        if rs["rs_vs_spy_10d"] is not None:
+            rs_parts.append(f"vs SPY 10d: {rs['rs_vs_spy_10d']:+.1f}%")
+        if rs["rs_vs_spy_20d"] is not None:
+            rs_parts.append(f"20d: {rs['rs_vs_spy_20d']:+.1f}%")
+        if rs["rs_vs_sector_10d"] is not None:
+            rs_parts.append(f"vs sector 10d: {rs['rs_vs_sector_10d']:+.1f}%")
+        if rs_parts:
+            lines.append(f"\nRelative Strength: {', '.join(rs_parts)}")
+
+    if sector_rank:
+        lines.append(f"Sector rank: #{sector_rank['rank']} ({sector_rank['pct_5d']:+.1f}% 5d)")
+
+    if signals:
+        lines.append(f"\nRecent signals ({len(signals)}):")
+        for s in signals[:5]:
+            br = base_rates.get(s["signal_type"])
+            br_str = ""
+            if br:
+                br_str = f" — avg {br['avg_return_10d']:+.2f}% in 10d, hit {br['hit_rate_10d']:.0f}% (n={br['sample_size']:,})"
+            lines.append(f"  [{s['date']}] {s['signal_type']} ({s['direction']}){br_str}")
+
+    if supports:
+        lines.append(f"\nSupport: {', '.join(supports[-3:])}")
+    if resistances:
+        lines.append(f"Resistance: {', '.join(resistances[:3])}")
+
+    risks = []
+    if ind and ind["rsi"] and ind["rsi"] > 70:
+        risks.append(f"RSI extended ({ind['rsi']:.0f})")
+    if ind and ind["adr_pct"] and ind["adr_pct"] > 5:
+        risks.append(f"High volatility (ADR {ind['adr_pct']:.1f}%)")
+    if resistances:
+        for r in sr_rows:
+            if r["level_type"] == "resistance" and r["level"] > close:
+                nearest_r = r["level"]
+                if (nearest_r - close) / close < 0.03:
+                    risks.append(f"Near resistance (${nearest_r:.2f}, {(nearest_r-close)/close*100:.1f}% away)")
+                break
+    if risks:
+        lines.append(f"\nRisk factors: {', '.join(risks)}")
+
+    return "\n".join(lines)
