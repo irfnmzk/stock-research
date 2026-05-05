@@ -30,12 +30,6 @@ indicators:
   atr_period: 14
   volume_avg_period: 20
 
-# --- Support / Resistance ---
-support_resistance:
-  window: 5             # argrelextrema window
-  cluster_pct: 0.02     # merge levels within 2%
-  min_touches: 2
-
 # --- Breakout ---
 breakout:
   volume_ratio_min: 1.5

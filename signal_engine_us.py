@@ -227,35 +227,6 @@ def _eval_bb_squeeze(ind_today, ind_yesterday, ticker, date) -> list[Signal]:
     return []
 
 
-def _eval_sr_break(db, ind_today, ind_yesterday, ticker, date) -> list[Signal]:
-    if not ind_yesterday:
-        return []
-    close_t = ind_today.get("ema10")
-    close_y = ind_yesterday.get("ema10")
-    if not close_t or not close_y:
-        return []
-
-    levels = db.execute(
-        "SELECT level, touch_count FROM support_resistance WHERE ticker = ? AND level_type = 'resistance'",
-        (ticker,),
-    ).fetchall()
-
-    signals = []
-    for lv in levels:
-        level = lv["level"]
-        touches = lv["touch_count"]
-        if touches < 2:
-            continue
-        if close_y <= level and close_t > level:
-            signals.append(Signal(
-                signal_type="sr_break", ticker=ticker, date=date, direction="bullish",
-                magnitude=level,
-                description=f"Broke resistance {level:.2f} ({touches} touches)",
-                meta={"level": level, "touch_count": touches},
-            ))
-    return signals
-
-
 def _eval_rs_breakout_spy(rs_today, rs_yesterday, ticker, date) -> list[Signal]:
     if not rs_yesterday:
         return []
@@ -330,7 +301,6 @@ def evaluate_signals(db, ticker: str, date: str) -> list[Signal]:
     signals.extend(_eval_ema_cross(ind_today, ind_yesterday, ticker, date))
     signals.extend(_eval_macd_flip(ind_today, ind_yesterday, ticker, date))
     signals.extend(_eval_bb_squeeze(ind_today, ind_yesterday, ticker, date))
-    signals.extend(_eval_sr_break(db, ind_today, ind_yesterday, ticker, date))
 
     if rs_today:
         signals.extend(_eval_rs_breakout_spy(rs_today, rs_yesterday, ticker, date))

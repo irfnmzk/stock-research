@@ -147,7 +147,6 @@ def fetch_prices_single(ticker: str, days: int = 365):
 def run_pipeline(days: int = 365):
     """Run the full US daily pipeline."""
     from indicators_us import compute_all as compute_indicators
-    from support_resistance_us import detect_all as compute_sr
     from signal_engine_us import (
         compute_relative_strength, compute_sector_rotation,
         evaluate_all, log_signals, get_us_db,
@@ -160,9 +159,6 @@ def run_pipeline(days: int = 365):
 
     print("\n--- Computing indicators ---")
     compute_indicators()
-
-    print("\n--- Computing S/R ---")
-    compute_sr()
 
     print("\n--- Computing relative strength ---")
     db = get_us_db()

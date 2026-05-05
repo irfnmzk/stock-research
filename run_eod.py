@@ -143,10 +143,9 @@ def _get_pool_symbols(cfg):
 
 
 def step_compute(cfg):
-    """Compute indicators, whale scores, S/R, sector rotation, temporal fields for all pool stocks."""
+    """Compute indicators, whale scores, sector rotation, temporal fields for all pool stocks."""
     from indicators import compute_all as compute_indicators
     from whale import compute_all as compute_whales
-    from support_resistance import detect_all
     from sector import compute_rotation
     from temporal import compute_all as compute_temporal
     from db import get_db
@@ -159,9 +158,6 @@ def step_compute(cfg):
 
     log.info("Computing whale scores...")
     compute_whales(cfg, symbols=pool)
-
-    log.info("Detecting S/R levels...")
-    detect_all(cfg, symbols=pool)
 
     log.info("Computing temporal fields...")
     compute_temporal(cfg, symbols=pool)
@@ -295,23 +291,6 @@ def step_assemble(cfg, signals_by_symbol=None) -> dict:
             entry["return_5d"] = round((close - hist[5]["close"]) / hist[5]["close"] * 100, 2) if len(hist) > 5 and hist[5]["close"] else None
             entry["return_10d"] = round((close - hist[10]["close"]) / hist[10]["close"] * 100, 2) if len(hist) > 10 and hist[10]["close"] else None
             entry["return_20d"] = round((close - hist[20]["close"]) / hist[20]["close"] * 100, 2) if len(hist) > 20 and hist[20]["close"] else None
-
-        # S/R zones
-        sr_rows = db.execute(
-            "SELECT level, level_type, touch_count FROM support_resistance WHERE symbol = ?",
-            (symbol,),
-        ).fetchall()
-        close = price_row["close"] if price_row else 0
-        entry["sr_zones"] = {
-            "resistance": [
-                {"level": r["level"], "touches": r["touch_count"]}
-                for r in sr_rows if r["level_type"] == "resistance" and r["level"] > close
-            ][:3],
-            "support": [
-                {"level": r["level"], "touches": r["touch_count"]}
-                for r in sr_rows if r["level_type"] == "support" and r["level"] < close
-            ][-3:],
-        }
 
         watchlist[symbol] = entry
 

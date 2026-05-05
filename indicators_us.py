@@ -81,7 +81,7 @@ def compute_all(tickers: list[str] | None = None):
     db = get_us_db()
     if tickers is None:
         rows = db.execute(
-            "SELECT ticker FROM assets WHERE active = 1 AND quote_type = 'EQUITY'"
+            "SELECT ticker FROM assets WHERE active = 1 AND quote_type IN ('EQUITY', 'ETF')"
         ).fetchall()
         tickers = [r["ticker"] for r in rows]
 

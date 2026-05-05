@@ -83,7 +83,6 @@ TOOL_DEFINITIONS = [
             "fundamentals(symbol, date, pe_ttm, pe_forward, pbv, ev_ebitda, dividend_yield, earnings_yield)\n"
             "news(symbol_queried, title, content, source, url, published_at, total_likes)\n"
             "insider(symbol, name, date, action_type, change_shares, price, badge)\n"
-            "support_resistance(symbol, level, level_type, touch_count, strength_score)\n"
             "sector_rotation(sector, date, pct_5d, pct_10d, pct_20d, rank_5d, rank_10d, rank_20d, momentum)\n"
             "whale_scores(symbol, date, foreign_flow_score, broker_score, composite_score)\n"
             "relative_strength(symbol, date, vs_ihsg_5d/10d/20d, vs_sector_5d/10d/20d)\n"
@@ -93,7 +92,7 @@ TOOL_DEFINITIONS = [
             "Signal display names (always use these instead of raw signal_type in responses):\n"
             "broker_significance=Broker Accumulation/Distribution, buyer_seller_imbalance=Stealth Buying, "
             "ema_cross=Golden Cross, macd_histogram_flip=MACD Flip, volume_spike=Volume Breakout, "
-            "bb_squeeze_release=BB Squeeze Release, sr_break=Falling Knife"
+            "bb_squeeze_release=BB Squeeze Release"
         ),
         "input_schema": {
             "type": "object",
@@ -242,15 +241,6 @@ def _handle_deep_dive(cfg, inp):
             parts.append(f"20d: {(close - hist[20]['close']) / hist[20]['close'] * 100:+.1f}%")
         price_info = ", ".join(parts)
 
-    # S/R levels
-    sr_rows = db.execute(
-        "SELECT level, level_type, touch_count FROM support_resistance WHERE symbol = ? ORDER BY level",
-        (symbol,),
-    ).fetchall()
-    close = hist[0]["close"] if hist else 0
-    supports = [f"{r['level']:,.0f} ({r['touch_count']}t)" for r in sr_rows if r["level_type"] == "support" and r["level"] < close]
-    resistances = [f"{r['level']:,.0f} ({r['touch_count']}t)" for r in sr_rows if r["level_type"] == "resistance" and r["level"] > close]
-
     # Indicators
     ind = db.execute(
         "SELECT rsi, volume_ratio, ema20, ema50, ema200 FROM indicators WHERE symbol = ? ORDER BY date DESC LIMIT 1",
@@ -281,11 +271,6 @@ def _handle_deep_dive(cfg, inp):
             lines.append(line)
     else:
         lines.append("\nNo active signals today.")
-
-    if supports:
-        lines.append(f"\nSupport: {', '.join(supports[-3:])}")
-    if resistances:
-        lines.append(f"Resistance: {', '.join(resistances[:3])}")
 
     if narrative and narrative != "No notable broker activity":
         lines.append(f"\nBroker activity: {narrative}")
@@ -481,7 +466,6 @@ def _handle_refresh(cfg, inp):
     from datetime import datetime
     from fetcher import fetch_prices, fetch_broker_summary
     from indicators import compute_all as compute_indicators
-    from support_resistance import detect_all as compute_sr
     from whale import compute_all as compute_whales
     from temporal import compute_all as compute_temporal
     from signal_engine import evaluate_all, log_signals
@@ -503,8 +487,6 @@ def _handle_refresh(cfg, inp):
     try:
         compute_indicators(cfg, symbols=syms)
         steps.append("indicators")
-        compute_sr(cfg, symbols=syms)
-        steps.append("S/R")
         compute_whales(cfg, symbols=syms)
         steps.append("whale scores")
         compute_temporal(cfg, symbols=syms)
@@ -618,13 +600,6 @@ def _handle_analyze_us(_cfg, inp):
         (ticker,),
     ).fetchone()
 
-    sr_rows = db.execute(
-        "SELECT level, level_type, touch_count FROM support_resistance WHERE ticker = ? ORDER BY level",
-        (ticker,),
-    ).fetchall()
-    supports = [f"${r['level']:.2f} ({r['touch_count']}t)" for r in sr_rows if r["level_type"] == "support" and r["level"] < close]
-    resistances = [f"${r['level']:.2f} ({r['touch_count']}t)" for r in sr_rows if r["level_type"] == "resistance" and r["level"] > close]
-
     signals = db.execute(
         """SELECT signal_type, date, direction, magnitude, meta
            FROM signal_events WHERE ticker = ? ORDER BY date DESC LIMIT 10""",
@@ -695,23 +670,11 @@ def _handle_analyze_us(_cfg, inp):
                 br_str = f" — avg {br['avg_return_10d']:+.2f}% in 10d, hit {br['hit_rate_10d']:.0f}% (n={br['sample_size']:,})"
             lines.append(f"  [{s['date']}] {s['signal_type']} ({s['direction']}){br_str}")
 
-    if supports:
-        lines.append(f"\nSupport: {', '.join(supports[-3:])}")
-    if resistances:
-        lines.append(f"Resistance: {', '.join(resistances[:3])}")
-
     risks = []
     if ind and ind["rsi"] and ind["rsi"] > 70:
         risks.append(f"RSI extended ({ind['rsi']:.0f})")
     if ind and ind["adr_pct"] and ind["adr_pct"] > 5:
         risks.append(f"High volatility (ADR {ind['adr_pct']:.1f}%)")
-    if resistances:
-        for r in sr_rows:
-            if r["level_type"] == "resistance" and r["level"] > close:
-                nearest_r = r["level"]
-                if (nearest_r - close) / close < 0.03:
-                    risks.append(f"Near resistance (${nearest_r:.2f}, {(nearest_r-close)/close*100:.1f}% away)")
-                break
     if risks:
         lines.append(f"\nRisk factors: {', '.join(risks)}")
 

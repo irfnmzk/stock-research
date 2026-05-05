@@ -134,16 +134,6 @@ CREATE TABLE IF NOT EXISTS indicators (
     PRIMARY KEY (symbol, date)
 );
 
-CREATE TABLE IF NOT EXISTS support_resistance (
-    symbol         TEXT NOT NULL,
-    level          REAL NOT NULL,
-    level_type     TEXT NOT NULL,
-    touch_count    INTEGER DEFAULT 1,
-    last_touched   TEXT,
-    strength_score REAL,
-    PRIMARY KEY (symbol, level, level_type)
-);
-
 CREATE TABLE IF NOT EXISTS whale_scores (
     symbol             TEXT NOT NULL,
     date               TEXT NOT NULL,
@@ -425,16 +415,6 @@ CREATE TABLE IF NOT EXISTS indicators (
     atr         REAL,
     adr_pct     REAL,
     PRIMARY KEY (ticker, date)
-);
-
-CREATE TABLE IF NOT EXISTS support_resistance (
-    ticker          TEXT NOT NULL,
-    level           REAL NOT NULL,
-    level_type      TEXT NOT NULL,
-    touch_count     INTEGER DEFAULT 1,
-    last_touched    TEXT,
-    strength_score  REAL,
-    PRIMARY KEY (ticker, level, level_type)
 );
 
 CREATE TABLE IF NOT EXISTS relative_strength (

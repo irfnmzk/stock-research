@@ -10,7 +10,7 @@ from signal_engine import evaluate_all
 # Minimum avg daily value (IDR) to include in scanner output
 LIQUIDITY_FLOOR = 500_000_000
 
-NOTABLE_SIGNAL_TYPES = {"volume_spike", "broker_significance", "sr_break"}
+NOTABLE_SIGNAL_TYPES = {"volume_spike", "broker_significance"}
 
 
 def _liquidity_percentiles(db):

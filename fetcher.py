@@ -425,10 +425,6 @@ def fetch_pool(cfg, days=180):
     from indicators import compute_all as compute_indicators
     compute_indicators(cfg, symbols=pool)
 
-    print(f"\n--- Computing S/R ---")
-    from support_resistance import detect_all as compute_sr
-    compute_sr(cfg, symbols=pool)
-
     print(f"\n--- Computing whale scores ---")
     from whale import compute_all as compute_whale
     compute_whale(cfg, symbols=pool)

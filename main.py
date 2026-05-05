@@ -59,11 +59,6 @@ def cmd_indicators(args, cfg):
     compute_all(cfg, symbols=args.symbols)
 
 
-def cmd_sr(args, cfg):
-    from support_resistance import detect_all
-    detect_all(cfg, symbols=args.symbols)
-
-
 def cmd_chart(args, cfg):
     from charts import render_chart, render_chart_us
     from db import get_us_db
@@ -294,10 +289,6 @@ def cli():
     p = sub.add_parser("indicators", help="compute technical indicators")
     p.add_argument("--symbols", nargs="*", help="override watchlist")
 
-    # sr
-    p = sub.add_parser("sr", help="detect support/resistance levels")
-    p.add_argument("--symbols", nargs="*", help="override watchlist")
-
     # chart
     p = sub.add_parser("chart", help="render chart for a symbol")
     p.add_argument("symbol", help="ticker symbol (e.g. BBRI)")
@@ -394,7 +385,6 @@ def cli():
         "fetch-news": cmd_fetch_news,
         "fetch-all": cmd_fetch_all,
         "indicators": cmd_indicators,
-        "sr": cmd_sr,
         "chart": cmd_chart,
         "fetch-macro": cmd_fetch_macro,
         "macro-signals": cmd_macro_signals,

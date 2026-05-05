@@ -19,7 +19,6 @@ SIGNAL_DISPLAY_NAMES = {
     ("macd_histogram_flip", "bullish"): "MACD Flip",
     ("volume_spike", "bullish"): "Volume Breakout",
     ("bb_squeeze_release", "bullish"): "BB Squeeze Release",
-    ("sr_break", "bullish"): "Falling Knife",
 }
 
 
@@ -76,16 +75,6 @@ def _load_price_pair(db, symbol, date):
     today = dict(rows[0])
     yesterday = dict(rows[1]) if len(rows) > 1 else None
     return today, yesterday
-
-
-def _load_sr_levels(db, symbol):
-    """Load S/R levels for a symbol."""
-    rows = db.execute(
-        """SELECT level, level_type, touch_count
-           FROM support_resistance WHERE symbol = ?""",
-        (symbol,),
-    ).fetchall()
-    return [dict(r) for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -291,39 +280,6 @@ def _eval_bb_squeeze_release(ind_today, ind_yesterday, price_today, symbol, date
     return signals
 
 
-def _eval_sr_break(db, price_today, price_yesterday, ind_today, symbol, date):
-    """Support break with volume — exit signal (bearish only)."""
-    signals = []
-    if not price_yesterday:
-        return signals
-
-    close_t = price_today["close"]
-    close_y = price_yesterday["close"]
-    vr = ind_today.get("volume_ratio") or 0
-
-    levels = _load_sr_levels(db, symbol)
-    if not levels:
-        return signals
-
-    for lv in levels:
-        level = lv["level"]
-        ltype = lv["level_type"]
-        touches = lv["touch_count"]
-        if touches < 2:
-            continue
-
-        if ltype == "support" and close_y >= level and close_t < level and vr >= 2.0:
-            signals.append(Signal(
-                signal_type="sr_break",
-                symbol=symbol, date=date, direction="bullish",
-                value=level,
-                description=f"Broke support {level:,.0f} ({touches} touches) on {vr:.1f}x volume",
-                meta={"touch_count": touches, "volume_ratio": round(vr, 2)},
-            ))
-
-    return signals
-
-
 # ---------------------------------------------------------------------------
 # Main evaluation
 # ---------------------------------------------------------------------------
@@ -345,12 +301,11 @@ def evaluate_signals(db, symbol, date):
     signals.extend(_eval_broker_significance(db, symbol, date, price_today))
     signals.extend(_eval_buyer_seller_imbalance(db, symbol, date, price_today, price_yesterday))
 
-    # Technical (4 entry + 1 exit)
+    # Technical (4 entry)
     signals.extend(_eval_ema_cross(ind_today, ind_yesterday, symbol, date))
     signals.extend(_eval_macd_histogram_flip(ind_today, ind_yesterday, symbol, date))
     signals.extend(_eval_volume_spike(ind_today, price_today, symbol, date))
     signals.extend(_eval_bb_squeeze_release(ind_today, ind_yesterday, price_today, symbol, date))
-    signals.extend(_eval_sr_break(db, price_today, price_yesterday, ind_today, symbol, date))
 
     return signals
 
