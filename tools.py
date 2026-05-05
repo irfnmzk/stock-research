@@ -362,12 +362,21 @@ def _handle_research(cfg, inp):
 
 
 def _handle_chart(cfg, inp):
-    from charts import render_chart
+    from charts import render_chart, render_chart_us
+    from db import get_us_db
     symbol = inp["symbol"].upper()
     days = inp.get("days", 90)
     path = render_chart(cfg, symbol=symbol, days=days)
     if path:
         return f"__CHART__:{path}"
+    # Fall back to US stock
+    db = get_us_db()
+    has_us = db.execute("SELECT 1 FROM prices WHERE ticker = ? LIMIT 1", (symbol,)).fetchone()
+    db.close()
+    if has_us:
+        path = render_chart_us(cfg, ticker=symbol, days=days)
+        if path:
+            return f"__CHART__:{path}"
     return f"No chart data available for {symbol}."
 
 

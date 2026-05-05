@@ -65,8 +65,16 @@ def cmd_sr(args, cfg):
 
 
 def cmd_chart(args, cfg):
-    from charts import render_chart
-    render_chart(cfg, symbol=args.symbol, days=args.days)
+    from charts import render_chart, render_chart_us
+    from db import get_us_db
+    symbol = args.symbol.upper()
+    path = render_chart(cfg, symbol=symbol, days=args.days)
+    if not path:
+        db = get_us_db()
+        has_us = db.execute("SELECT 1 FROM prices WHERE ticker = ? LIMIT 1", (symbol,)).fetchone()
+        db.close()
+        if has_us:
+            render_chart_us(cfg, ticker=symbol, days=args.days)
 
 
 def cmd_fetch_macro(args, cfg):
