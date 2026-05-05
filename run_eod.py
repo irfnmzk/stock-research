@@ -107,17 +107,22 @@ def step_fetch(cfg, fetch_days=180):
     from fetcher import fetch_prices, fetch_broker_summary, fetch_fundamentals, _pool_symbols
     from news import fetch_news
 
-    log.info("Fetching prices (%d days)...", fetch_days)
-    fetch_prices(cfg, days=fetch_days)
-
-    # Fetch broker data for full 300-stock pool (not just watchlist)
-    # to accumulate data for smart money / broker scoring analysis
+    # Use full scan_pool for prices (not just watchlist)
     pool = _pool_symbols(cfg)
+    if not pool:
+        log.warning("scan_pool empty — running refresh_pool first")
+        from fetcher import refresh_pool
+        refresh_pool(cfg)
+        pool = _pool_symbols(cfg)
+
+    log.info("Fetching prices for %d pool stocks (%d days)...", len(pool), fetch_days)
+    fetch_prices(cfg, symbols=pool, days=fetch_days)
+
     log.info("Fetching broker data (%d pool stocks)...", len(pool))
-    fetch_broker_summary(cfg, symbols=pool if pool else None)
+    fetch_broker_summary(cfg, symbols=pool)
 
     log.info("Fetching fundamentals...")
-    fetch_fundamentals(cfg)
+    fetch_fundamentals(cfg, symbols=pool)
 
     log.info("Fetching news...")
     fetch_news(cfg)
@@ -396,117 +401,252 @@ def step_charts(cfg, data: dict, chart_days=90) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# US Pipeline steps
+# ---------------------------------------------------------------------------
+
+def step_us_fetch(fetch_days=365):
+    """Fetch US prices and compute all derived data."""
+    from fetcher_us import fetch_prices, run_pipeline
+
+    log.info("=== US Pipeline ===")
+    log.info("Running US pipeline (fetch + compute)...")
+    run_pipeline(days=fetch_days)
+
+
+def step_us_base_rates():
+    """Fill forward returns for US signals and recompute base rates."""
+    from db import get_us_db
+    from datetime import date
+
+    db = get_us_db()
+
+    # Check if base rates need recomputing (weekly or empty)
+    count = db.execute("SELECT COUNT(*) FROM signal_base_rates").fetchone()[0]
+    is_friday = date.today().weekday() == 4
+
+    if not is_friday and count > 0:
+        db.close()
+        log.info("US base rates up to date (recompute on Fridays)")
+        return
+
+    log.info("Recomputing US signal base rates...")
+    signal_types = [r["signal_type"] for r in db.execute("SELECT DISTINCT signal_type FROM signal_events").fetchall()]
+
+    for st in signal_types:
+        stats = db.execute('''
+            SELECT
+                COUNT(*) as n,
+                AVG(fwd_5d) as avg_5,
+                AVG(fwd_10d) as avg_10,
+                AVG(fwd_20d) as avg_20,
+                SUM(CASE WHEN fwd_5d > 0 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(fwd_5d), 0) as hit_5,
+                SUM(CASE WHEN fwd_10d > 0 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(fwd_10d), 0) as hit_10,
+                SUM(CASE WHEN fwd_20d > 0 THEN 1 ELSE 0 END) * 100.0 / NULLIF(COUNT(fwd_20d), 0) as hit_20
+            FROM signal_events
+            WHERE signal_type = ? AND fwd_10d IS NOT NULL
+        ''', (st,)).fetchone()
+
+        if stats["n"] > 0:
+            db.execute('''
+                INSERT OR REPLACE INTO signal_base_rates
+                (signal_type, sample_size, hit_rate_5d, hit_rate_10d, hit_rate_20d,
+                 avg_return_5d, avg_return_10d, avg_return_20d, last_computed)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (st, stats["n"], stats["hit_5"], stats["hit_10"], stats["hit_20"],
+                  stats["avg_5"], stats["avg_10"], stats["avg_20"], date.today().isoformat()))
+
+    db.commit()
+    db.close()
+    log.info("US base rates updated")
+
+
+def step_us_report(notify=False):
+    """Assemble US scanner report and optionally send via Telegram."""
+    from scanner_us import scan, format_scan_output
+    from db import get_us_db
+
+    log.info("Assembling US report...")
+    candidates = scan(top_n=15)
+
+    db = get_us_db()
+    br_rows = db.execute("SELECT * FROM signal_base_rates").fetchall()
+    base_rates = {r["signal_type"]: dict(r) for r in br_rows}
+    db.close()
+
+    output = format_scan_output(candidates, base_rates=base_rates)
+    log.info("US scanner: %d candidates", len(candidates))
+
+    # Write to file for Telegram bot to pick up
+    us_report_path = DATA_DIR / "latest_us_scan.txt"
+    us_report_path.write_text(output)
+    log.info("Wrote %s", us_report_path)
+
+    if notify:
+        try:
+            import asyncio
+            from telegram.ext import Application
+
+            token = os.environ.get("TELEGRAM_BOT_TOKEN")
+            chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+            if token and chat_id:
+                log.info("Sending US brief via Telegram...")
+
+                async def send():
+                    app = Application.builder().token(token).build()
+                    await app.initialize()
+                    await app.bot.send_message(chat_id=chat_id, text=f"<b>US Scanner Report</b>\n\n<pre>{output}</pre>", parse_mode="HTML")
+                    await app.shutdown()
+
+                asyncio.run(send())
+                log.info("US brief sent.")
+            else:
+                log.warning("--notify requested but TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set")
+        except Exception as e:
+            log.error("US Telegram notification failed: %s", e)
+
+    return output
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
-def run(config_path="config.yaml", fetch_days=180, chart_days=90, notify=False):
-    """Run the full EOD pipeline."""
+def run(config_path="config.yaml", fetch_days=180, chart_days=90, notify=False,
+        market="idx", step="all"):
+    """Run the EOD pipeline.
+
+    Args:
+        market: 'idx', 'us', or 'all'
+        step: 'fetch' (data only), 'report' (assemble + notify), or 'all'
+    """
     t0 = time.time()
     errors = []
 
     log.info("=" * 60)
-    log.info("EOD Pipeline started")
+    log.info("EOD Pipeline started (market=%s, step=%s)", market, step)
 
-    # Load config
+    # Load config (needed for IDX)
     with open(SCRIPT_DIR / config_path) as f:
         cfg = yaml.safe_load(f)
 
-    # Step 1: Fetch
-    try:
-        step_fetch(cfg, fetch_days=fetch_days)
-    except Exception as e:
-        msg = f"Fetch failed: {e}"
-        log.error(msg)
-        log.error(traceback.format_exc())
-        errors.append(msg)
+    # --- IDX ---
+    if market in ("idx", "all"):
+        if step in ("fetch", "all"):
+            try:
+                step_fetch(cfg, fetch_days=fetch_days)
+            except Exception as e:
+                msg = f"IDX fetch failed: {e}"
+                log.error(msg)
+                log.error(traceback.format_exc())
+                errors.append(msg)
 
-    # Step 2: Compute (can run on stale data if fetch partially failed)
-    try:
-        step_compute(cfg)
-    except Exception as e:
-        msg = f"Compute failed: {e}"
-        log.error(msg)
-        log.error(traceback.format_exc())
-        errors.append(msg)
+            try:
+                step_compute(cfg)
+            except Exception as e:
+                msg = f"IDX compute failed: {e}"
+                log.error(msg)
+                log.error(traceback.format_exc())
+                errors.append(msg)
 
-    # Step 2b: Evaluate signals
-    signals_by_symbol = None
-    try:
-        signals_by_symbol = step_signals(cfg)
-    except Exception as e:
-        msg = f"Signals failed: {e}"
-        log.error(msg)
-        log.error(traceback.format_exc())
-        errors.append(msg)
+            signals_by_symbol = None
+            try:
+                signals_by_symbol = step_signals(cfg)
+            except Exception as e:
+                msg = f"IDX signals failed: {e}"
+                log.error(msg)
+                log.error(traceback.format_exc())
+                errors.append(msg)
 
-    # Step 2c: Fill forward returns and recompute base rates
-    try:
-        step_base_rates(cfg)
-    except Exception as e:
-        msg = f"Base rates failed: {e}"
-        log.error(msg)
-        log.error(traceback.format_exc())
-        errors.append(msg)
+            try:
+                step_base_rates(cfg)
+            except Exception as e:
+                msg = f"IDX base rates failed: {e}"
+                log.error(msg)
+                log.error(traceback.format_exc())
+                errors.append(msg)
 
-    # Step 3: Assemble report data
-    data = None
-    try:
-        data = step_assemble(cfg, signals_by_symbol=signals_by_symbol)
-    except Exception as e:
-        msg = f"Assemble failed: {e}"
-        log.error(msg)
-        log.error(traceback.format_exc())
-        errors.append(msg)
+        if step in ("report", "all"):
+            signals_by_symbol = signals_by_symbol if step == "all" else None
+            data = None
+            try:
+                data = step_assemble(cfg, signals_by_symbol=signals_by_symbol)
+            except Exception as e:
+                msg = f"IDX assemble failed: {e}"
+                log.error(msg)
+                log.error(traceback.format_exc())
+                errors.append(msg)
 
-    # Step 4: Charts
-    if data:
-        try:
-            log.info("Generating charts...")
-            chart_paths = step_charts(cfg, data, chart_days=chart_days)
-            data["chart_paths"] = chart_paths
-        except Exception as e:
-            msg = f"Charts failed: {e}"
-            log.error(msg)
-            errors.append(msg)
+            if data:
+                try:
+                    log.info("Generating charts...")
+                    chart_paths = step_charts(cfg, data, chart_days=chart_days)
+                    data["chart_paths"] = chart_paths
+                except Exception as e:
+                    msg = f"Charts failed: {e}"
+                    log.error(msg)
+                    errors.append(msg)
+
+                data["generated_at"] = datetime.now().isoformat()
+                _atomic_write_json(EOD_PATH, data)
+                log.info("Wrote %s", EOD_PATH)
+
+            if notify and data:
+                try:
+                    import asyncio
+                    from bot import trigger_eod_brief
+                    from telegram.ext import Application
+
+                    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+                    if token:
+                        log.info("Sending IDX EOD brief via Telegram...")
+                        app = Application.builder().token(token).build()
+                        asyncio.run(app.initialize())
+                        asyncio.run(trigger_eod_brief(cfg, app))
+                        asyncio.run(app.shutdown())
+                        log.info("IDX EOD brief sent.")
+                    else:
+                        log.warning("TELEGRAM_BOT_TOKEN not set")
+                except Exception as e:
+                    log.error("IDX Telegram notification failed: %s", e)
+
+    # --- US ---
+    if market in ("us", "all"):
+        if step in ("fetch", "all"):
+            try:
+                step_us_fetch(fetch_days=365)
+            except Exception as e:
+                msg = f"US fetch failed: {e}"
+                log.error(msg)
+                log.error(traceback.format_exc())
+                errors.append(msg)
+
+            try:
+                step_us_base_rates()
+            except Exception as e:
+                msg = f"US base rates failed: {e}"
+                log.error(msg)
+                log.error(traceback.format_exc())
+                errors.append(msg)
+
+        if step in ("report", "all"):
+            try:
+                step_us_report(notify=notify)
+            except Exception as e:
+                msg = f"US report failed: {e}"
+                log.error(msg)
+                log.error(traceback.format_exc())
+                errors.append(msg)
 
     duration = time.time() - t0
 
-    # Write output
-    if data:
-        data["generated_at"] = datetime.now().isoformat()
-        _atomic_write_json(EOD_PATH, data)
-        log.info("Wrote %s", EOD_PATH)
-
     # Write status
-    if errors and data:
-        _write_status("partial", error="; ".join(errors), partial=True, duration_s=duration)
+    if errors:
+        _write_status("partial" if market != "all" else "error",
+                     error="; ".join(errors), duration_s=duration)
         log.warning("Pipeline completed with errors (%.1fs): %s", duration, "; ".join(errors))
-    elif errors:
-        _write_status("error", error="; ".join(errors), duration_s=duration)
-        log.error("Pipeline failed (%.1fs): %s", duration, "; ".join(errors))
     else:
         _write_status("ok", duration_s=duration)
         log.info("Pipeline completed successfully (%.1fs)", duration)
-
-    # Send Telegram notification if requested and pipeline produced data
-    if notify and data:
-        try:
-            import asyncio
-            from bot import trigger_eod_brief
-            from telegram.ext import Application
-
-            token = os.environ.get("TELEGRAM_BOT_TOKEN")
-            if token:
-                log.info("Sending EOD brief via Telegram...")
-                app = Application.builder().token(token).build()
-                asyncio.run(app.initialize())
-                asyncio.run(trigger_eod_brief(cfg, app))
-                asyncio.run(app.shutdown())
-                log.info("EOD brief sent.")
-            else:
-                log.warning("--notify requested but TELEGRAM_BOT_TOKEN not set")
-        except Exception as e:
-            log.error("Telegram notification failed: %s", e)
 
     return len(errors) == 0
 
@@ -514,10 +654,17 @@ def run(config_path="config.yaml", fetch_days=180, chart_days=90, notify=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="EOD Pipeline (standalone)")
     parser.add_argument("--config", default="config.yaml", help="config file")
-    parser.add_argument("--fetch-days", type=int, default=180, help="days of price history")
+    parser.add_argument("--market", choices=["idx", "us", "all"], default="all",
+                       help="which market to run (default: all)")
+    parser.add_argument("--step", choices=["fetch", "report", "all"], default="all",
+                       help="which step to run (default: all)")
+    parser.add_argument("--fetch-days", type=int, default=180, help="days of price history (IDX)")
     parser.add_argument("--chart-days", type=int, default=90, help="chart lookback days")
-    parser.add_argument("--notify", action="store_true", help="send EOD brief via Telegram after pipeline completes")
+    parser.add_argument("--notify", action="store_true",
+                       help="send brief via Telegram after pipeline completes")
     args = parser.parse_args()
 
-    ok = run(config_path=args.config, fetch_days=args.fetch_days, chart_days=args.chart_days, notify=args.notify)
+    ok = run(config_path=args.config, fetch_days=args.fetch_days,
+             chart_days=args.chart_days, notify=args.notify,
+             market=args.market, step=args.step)
     sys.exit(0 if ok else 1)

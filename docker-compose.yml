@@ -9,3 +9,15 @@ services:
       - ./config.yaml:/app/config.yaml:ro
     environment:
       - TZ=Asia/Jakarta
+
+  scheduler:
+    build: .
+    container_name: stock-research-scheduler
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./config.yaml:/app/config.yaml:ro
+    environment:
+      - TZ=Asia/Jakarta
+    command: ["python", "scheduler.py"]
